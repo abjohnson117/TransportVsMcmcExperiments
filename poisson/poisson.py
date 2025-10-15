@@ -270,7 +270,8 @@ if __name__ == "__main__":
     #
     ntargets = 100
     # rel_noise = 0.005
-    rel_noise = 0.25
+    # rel_noise = 0.25
+    rel_noise = 0.001
 
     print("Number of observation points: {0}".format(ntargets))
 
@@ -281,7 +282,8 @@ if __name__ == "__main__":
 
         MAX = misfit.d.norm("linf")
         noise_std_dev = rel_noise * MAX
-        misfit.noise_variance = noise_std_dev * noise_std_dev
+        # misfit.noise_variance = noise_std_dev * noise_std_dev
+        misfit.noise_variance = rel_noise
         print(f"This is the noise added to observed targets: {misfit.noise_variance}")
 
     else:
@@ -322,7 +324,9 @@ if __name__ == "__main__":
         misfit.B.mult(x[hp.STATE], misfit.d)
         MAX = misfit.d.norm("linf")
         noise_std_dev = rel_noise * MAX
-        misfit.noise_variance = noise_std_dev * noise_std_dev
+        # misfit.noise_variance = noise_std_dev * noise_std_dev
+        misfit.noise_variance = rel_noise
+        print(f"This is the noise added to observed targets: {misfit.noise_variance}")
 
         hp.parRandom.normal_perturb(noise_std_dev, misfit.d)
 

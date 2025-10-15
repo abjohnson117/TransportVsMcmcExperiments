@@ -6,7 +6,7 @@ plot: False
 
 # if False, the observation data will be stored to "data.h5"
 # if True, it will read the observation data from "data.h5"
-have_data: True
+have_data: False
 
 MCMC:
     # The file name (without extension) to save samples generated

@@ -20,7 +20,9 @@ import matplotlib.tri as tri
 import hippylib2muq as hm
 
 ntargets = 100
-rel_noise = 0.005
+# rel_noise = 0.005
+# rel_noise = 0.25
+rel_noise = 0.001
 
 def get_data(arg, vec, mesh):
     # sqrt_dim = int(np.sqrt(arg.dim()))
@@ -118,7 +120,8 @@ def generate_sample(mesh, Vh, pde, prior):
         misfit.B.mult(x[hp.STATE], misfit.d)
         MAX = misfit.d.norm("linf")
         noise_std_dev = rel_noise * MAX
-        misfit.noise_variance = noise_std_dev * noise_std_dev
+        # misfit.noise_variance = noise_std_dev * noise_std_dev
+        misfit.noise_variance = rel_noise
 
         hp.parRandom.normal_perturb(noise_std_dev, misfit.d)
 
