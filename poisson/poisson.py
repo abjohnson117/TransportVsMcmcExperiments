@@ -208,6 +208,7 @@ if __name__ == "__main__":
 
     sep = "\n" + "#" * 80 + "\n"
     output_root = "training_dataset"
+    # output_dir = os.path.join(output_root, f"chain_{RANK:02d}")
     output_dir = os.path.join(output_root, f"chain_{RANK:02d}")
     os.makedirs(output_dir, exist_ok=True)
     #
@@ -268,7 +269,8 @@ if __name__ == "__main__":
     #  Set up the misfit functional and generate synthetic observations
     #
     ntargets = 100
-    rel_noise = 0.005
+    # rel_noise = 0.005
+    rel_noise = 0.25
 
     print("Number of observation points: {0}".format(ntargets))
 
@@ -280,6 +282,7 @@ if __name__ == "__main__":
         MAX = misfit.d.norm("linf")
         noise_std_dev = rel_noise * MAX
         misfit.noise_variance = noise_std_dev * noise_std_dev
+        print(f"This is the noise added to observed targets: {misfit.noise_variance}")
 
     else:
         # targets = np.random.uniform(0.05, 0.95, [ntargets, 2])

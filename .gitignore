@@ -167,6 +167,7 @@ poisson/training_dataset
 poisson/*.log
 poisson/*.h5
 poisson/*.xdmf
+broken_poisson_rootlock
 p-poisson/test_dataset
 p-poisson/training_dataset
 p-poisson/*.log
