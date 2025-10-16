@@ -249,7 +249,8 @@ if __name__ == "__main__":
     # Set up the prior
     #
     gamma = 1.0
-    delta = 9.0
+    # delta = 9.0
+    delta = 1.0 # This was 9.0
     # theta0 = 2.0
     # theta1 = 0.5
     # alpha = math.pi / 4
@@ -271,7 +272,7 @@ if __name__ == "__main__":
     ntargets = 100
     # rel_noise = 0.005
     # rel_noise = 0.25
-    rel_noise = 0.001
+    rel_noise = 1e-6
 
     print("Number of observation points: {0}".format(ntargets))
 
@@ -282,8 +283,8 @@ if __name__ == "__main__":
 
         MAX = misfit.d.norm("linf")
         noise_std_dev = rel_noise * MAX
-        # misfit.noise_variance = noise_std_dev * noise_std_dev
-        misfit.noise_variance = rel_noise
+        misfit.noise_variance = noise_std_dev * noise_std_dev
+        # misfit.noise_variance = rel_noise
         print(f"This is the noise added to observed targets: {misfit.noise_variance}")
 
     else:
@@ -367,6 +368,11 @@ if __name__ == "__main__":
     solver.parameters["LS"]["c_armijo"] = 1e-4
 
     x = solver.solve([None, m, None])
+    map_array = get_data(Vh[hp.PARAMETER], x[hp.PARAMETER], mesh)
+    np.save(
+        os.path.join(output_root, "map_param_grid.npy"),
+        map_array,
+    )
 
     if solver.converged:
         print("\nConverged in ", solver.it, " iterations.")
@@ -435,7 +441,7 @@ if __name__ == "__main__":
     param2likelihood.EnableCache()
 
     # Construct the problem
-    # post_dens = workgraph.CreateModPiece("Target")
+    post_dens = workgraph.CreateModPiece("Target")
     print(f"Starting {inargs['MCMC']['name']} chain...")
 
     postDens = workgraph.CreateModPiece("Target")
