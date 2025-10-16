@@ -23,6 +23,7 @@ ntargets = 100
 # rel_noise = 0.005
 # rel_noise = 0.25
 rel_noise = 1e-6
+# rel_noise = 0.001
 
 def get_data(arg, vec, mesh):
     # sqrt_dim = int(np.sqrt(arg.dim()))
@@ -92,8 +93,9 @@ def setup_problem(yamlfile):
     pde = hp.PDEVariationalProblem(Vh, pde_varf, bc, bc0, is_fwd_linear=True)
 
     gamma = 1.0
-    delta = 1.0 # This was 9.0
-    anis_diff = dl.Identity(2)
+    # delta = 1.0 # This was 9.0
+    delta = 9.0
+    anis_diff = dl.Identity(2) # TODO: Try to get rid of anis_diff here and see if it makes any difference
 
     prior = hp.BiLaplacianPrior(
         Vh[hp.PARAMETER], gamma, delta, anis_diff, robin_bc=True
@@ -175,10 +177,10 @@ def main():
 
     # Save the datasets
     print("\nSaving datasets...")
-    np.save(os.path.join(output_dir, "parameters.npy"), parameters)
-    np.save(os.path.join(output_dir, "solutions_full.npy"), solutions)
-    np.save(os.path.join(output_dir, "solutions_grid.npy"), misfits)
-    np.save(os.path.join(output_dir, "locations_grid.npy"), targets)
+    np.save(os.path.join(output_dir, "parameters_delta.npy"), parameters)
+    np.save(os.path.join(output_dir, "solutions_full_delta.npy"), solutions)
+    np.save(os.path.join(output_dir, "solutions_grid_delta.npy"), misfits)
+    np.save(os.path.join(output_dir, "locations_grid_delta.npy"), targets)
 
     print("\nDataset generation complete!")
     print(f"Files are saved in the '{output_dir}' directory as:")
