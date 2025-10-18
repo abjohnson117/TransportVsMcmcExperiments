@@ -55,6 +55,31 @@ def read_data_h5(path="data.h5"):
         data = f["/data"][...]
     return targets, data
 
+def get_pca_fns(us):
+    mean_us = us.mean(axis=0)
+    X = us - mean_us
+
+    U, S, Vt = np.linalg.svd(us / (np.sqrt(train_dim - 1)), full_matrices=False)
+    V = Vt.T
+
+    expl_var = (S**2) / (S**2).sum()
+    k = np.searchsorted(np.cumsum(expl_var), 0.98) + 1
+
+    V = V[:, :k]
+    S = S[:k]
+
+
+    def pca_encode(b):
+        # whitened coeffs z
+        return (b - mean_us) @ V / S
+
+
+    def pca_decode(z):
+        # undo whitening
+        return mean_us + (z * S) @ V.T
+    
+    return pca_encode, pca_decode, k
+
 gamma = 10.0
 rbf_kernel = get_gaussianRBF(gamma)
 
@@ -108,52 +133,32 @@ np.random.shuffle(us_test)
 ys_normalizer = UnitGaussianNormalizer(ys)
 ys_normalized = ys_normalizer.encode()
 
-mean_us = us.mean(axis=0)
-X = us - mean_us
 
-U, S, Vt = np.linalg.svd(us / (np.sqrt(train_dim - 1)), full_matrices=False)
-V = Vt.T
+# sample_no_list = [2**i for i in range(1, 15)]
+# sample_no_list.append(nsamples)
+# sample_no_list.append(30000)
+# sample_no_list.append(40000)
+# sample_no_list.append(train_dim)
+sample_no_list = [2, train_dim]
 
-expl_var = (S**2) / (S**2).sum()
-k = np.searchsorted(np.cumsum(expl_var), 0.98) + 1
-# k = 30
-
-V = V[:, :k]
-S = S[:k]
-
-alpha = 0.1
-
-
-def pca_encode(b):
-    # whitened coeffs z
-    return (b - mean_us) @ V / S
-
-
-def pca_decode(z):
-    # undo whitening
-    return mean_us + (z * S) @ V.T
-
-
-sample_no_list = [2**i for i in range(1, 15)]
-sample_no_list.append(nsamples)
-sample_no_list.append(30000)
-sample_no_list.append(40000)
-sample_no_list.append(train_dim)
-
-mmd_array = jnp.zeros(len(sample_no_list))
+mmd_array = np.zeros(len(sample_no_list))
 for i, sample_no in tqdm(enumerate(sample_no_list)):
     print("Starting training...")
-    y = ys_normalized[: (sample_no + 1), :]
-    u = us[: (sample_no + 1), :]
-    u_ref = us_ref[: (sample_no + 1), :]
-    u_test = us_test[: (sample_no + 1), :]
+    y = ys_normalized[1 : (sample_no + 1), :]
+    u = us[1 : (sample_no + 1), :]
+    u_ref = us_ref[1 : (sample_no + 1), :]
+    u_test = us_test.copy()
+    print(f"This is the size of y: {y.shape}")
+    print(f"This is the size of u: {u.shape}")
 
-    us_pca = pca_encode(us)
-    us_ref_pca = pca_encode(us_ref)
-    us_test_pca = pca_encode(us_test)
+    pca_encode, pca_decode, k = get_pca_fns(u)
 
-    target_data = jnp.hstack([ys_normalized, us_pca])
-    ref_data = jnp.hstack([ys_normalized, us_ref_pca])
+    us_pca = pca_encode(u)
+    us_ref_pca = pca_encode(u_ref)
+    us_test_pca = pca_encode(u_test)
+
+    target_data = jnp.hstack([y, us_pca])
+    ref_data = jnp.hstack([y, us_ref_pca])
 
     key = random.PRNGKey(seed=np.random.choice(1000))
     key1, key2 = random.split(key=key, num=2)
@@ -223,7 +228,8 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     u_samples = u_samples.reshape(nsamples, nx, ny)
 
     print("Calculating MMD...")
-    mmd_array.at[i].set(MMD(u_samples, hmala_samps))
+    mmd_array[i] = MMD(u_samples, hmala_samps)
+    np.save(os.path.join(output_dir, f"u_samps_{i}.npy"), u_samples)
 
 print("Successfully trained all models and now saving results!")
-np.save(os.path.join(output_root, "nn_sample_convergence.npy"))
+np.save(os.path.join(output_dir, "nn_sample_convergence.npy"), mmd_array)
