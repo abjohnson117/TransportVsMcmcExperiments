@@ -39,7 +39,7 @@ import h5py
 
 import argparse
 
-plt.style.use("ggplot")
+# plt.style.use("ggplot")
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
@@ -187,6 +187,7 @@ sample_no_list.append(train_dim)
 
 mmd_array = np.zeros(len(sample_no_list))
 rel_err_array = np.zeros(len(sample_no_list))
+u_mean_array = np.zeros(len(sample_no_list), nx, ny)
 for i, sample_no in tqdm(enumerate(sample_no_list)):
     print("Starting training...")
     y = ys_normalized[1 : (sample_no + 1), :]
@@ -265,18 +266,36 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     )
     all_samples = cond_samples
 
-    u_samples = all_samples[:, yu_dimension[0] :]
-    u_samples = pca_decode(u_samples)
-    u_samples = pca_encode_total(u_samples) # To make sure in exactly the correct PCA basis
-    # u_samples = u_samples.reshape(nsamples, nx, ny)
+    u_samples_gen = all_samples[:, yu_dimension[0] :]
+    u_samples = pca_decode(u_samples_gen)
+    u_samples_pca = pca_encode_total(u_samples) # To make sure in exactly the correct PCA basis
+
+    u_samples = u_samples.reshape(nsamples, nx, ny)
+    u_mean = np.mean(u_samples, axis=0)
+    u_mean_array[i] = u_mean
 
     print("Calculating MMD...")
-    mmd_array[i] = MMD(u_samples, hmala_pca)
-    rel_err_array[i] = get_kme(u_samples, hmala_pca)
-    print(f"This is the MMD: {MMD(u_samples, hmala_pca)}")
-    print(f"This is the calculated relative error: {get_kme(u_samples, hmala_pca)}")
-    np.save(os.path.join(output_dir, f"u_samps_{i}.npy"), u_samples)
+    mmd_array[i] = MMD(u_samples_pca, hmala_pca)
+    rel_err_array[i] = get_kme(u_samples_pca, hmala_pca)
+    print(f"This is the MMD: {MMD(u_samples_pca, hmala_pca)}")
+    print(f"This is the calculated relative error: {get_kme(u_samples_pca, hmala_pca)}")
+    np.save(os.path.join(output_dir, f"u_samps_{i}.npy"), u_samples_pca)
 
 print("Successfully trained all models and now saving results!")
 np.save(os.path.join(output_dir, "nn_sample_convergence.npy"), mmd_array)
 np.save(os.path.join(output_dir, "nn_sample_convergence_rel_error.npy"), rel_err_array)
+
+print("Making plot...")
+fig, ax = plt.subplots(3, 6, figsize=(16,16))
+l = 0
+
+for i in range(len(ax)):
+    for j in range(len(ax[0, :])):
+        im = ax[i][j].imshow(u_mean_array[l], origin="lower", interpolation="bilinear")
+        ax[i][j].set_title(rf"Mean with $n = {sample_no_list[l]}$")
+        fig.colorbar(im, ax=ax[i][j], fraction=0.046, pad=0.04)
+
+        l += 1
+
+plt.tight_layout()
+plt.savefig(os.path.join(output_dir, "param_field_means.png")) # TODO: Potentially change this to pdf later.
