@@ -61,7 +61,7 @@ def get_pca_fns(us):
     mean_us = us.mean(axis=0)
     X = us - mean_us
 
-    U, S, Vt = np.linalg.svd(us / (np.sqrt(train_dim - 1)), full_matrices=False)
+    U, S, Vt = np.linalg.svd(X / (np.sqrt(train_dim - 1)), full_matrices=False) # Changed from us to X
     V = Vt.T
 
     expl_var = (S**2) / (S**2).sum()
@@ -172,11 +172,11 @@ def get_kme(X, Y):
 def MMD(X, Y):
     return jnp.mean(ker(X, X)) + jnp.mean(ker(Y, Y)) - 2 * jnp.mean(ker(X, Y))
 
-pca_encode, pca_decode, k = get_pca_fns(us)
-us_pca_total = pca_encode(us)
-us_ref_pca_total = pca_encode(us_ref)
-us_test_pca = pca_encode(us_test)
-hmala_pca = pca_encode(hmala_samps)
+pca_encode_total, pca_decode_total, k = get_pca_fns(us)
+# us_pca_total = pca_encode(us)
+# us_ref_pca_total = pca_encode(us_ref)
+# us_test_pca = pca_encode_total(us_test)
+hmala_pca = pca_encode_total(hmala_samps)
 
 sample_no_list = [2**i for i in range(1, 15)]
 sample_no_list.append(nsamples)
@@ -190,11 +190,17 @@ rel_err_array = np.zeros(len(sample_no_list))
 for i, sample_no in tqdm(enumerate(sample_no_list)):
     print("Starting training...")
     y = ys_normalized[1 : (sample_no + 1), :]
-    us_pca = us_pca_total[1 : (sample_no + 1), :]
-    us_ref_pca = us_ref_pca_total[1 : (sample_no + 1), :]
+    u = us[1 : (sample_no + 1), :]
+    u_ref = us_ref[1 : (sample_no + 1), :]
+
+    pca_encode, pca_decode, k = get_pca_fns(u)
+    us_pca = pca_encode(u)
+    us_ref_pca = pca_encode(u_ref)
+    us_test_pca = pca_encode(us_test)
 
     target_data = jnp.hstack([y, us_pca])
     ref_data = jnp.hstack([y, us_ref_pca])
+    print(f"This is the size of target and ref data: {target_data.shape} and {ref_data.shape}")
 
     key = random.PRNGKey(seed=np.random.choice(1000))
     key1, key2 = random.split(key=key, num=2)
@@ -248,26 +254,28 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     )
     ytrue_flat = yobs.copy()
     ytrue_flat_normalized = ys_normalizer.encode(ytrue_flat)
-    ys_test_normalized = jnp.full(
-        (nsamples, ytrue_flat_normalized.shape[0]), ytrue_flat_normalized
-    )
-    x0_test = jnp.hstack([ys_test_normalized, us_test_pca])
+    # ys_test_normalized = jnp.full(
+    #     (nsamples, ytrue_flat_normalized.shape[0]), ytrue_flat_normalized
+    # )
+    # x0_test = jnp.hstack([ys_test_normalized, us_test_pca])
 
     cond_values = ytrue_flat_normalized
     cond_samples = trainer.conditional_sample(
-        cond_values=cond_values, x0_cond=x0_test, nsamples=20000
+        cond_values=cond_values, u0_cond=us_test_pca, nsamples=20000
     )
-    all_samples = cond_samples[0][0]
+    all_samples = cond_samples
 
     u_samples = all_samples[:, yu_dimension[0] :]
     u_samples = pca_decode(u_samples)
-    u_samples = pca_encode(u_samples) # To make sure in exactly the correct PCA basis
+    u_samples = pca_encode_total(u_samples) # To make sure in exactly the correct PCA basis
     # u_samples = u_samples.reshape(nsamples, nx, ny)
 
     print("Calculating MMD...")
     mmd_array[i] = MMD(u_samples, hmala_pca)
     rel_err_array[i] = get_kme(u_samples, hmala_pca)
-    # np.save(os.path.join(output_dir, f"u_samps_{i}.npy"), u_samples)
+    print(f"This is the MMD: {MMD(u_samples, hmala_pca)}")
+    print(f"This is the calculated relative error: {get_kme(u_samples, hmala_pca)}")
+    np.save(os.path.join(output_dir, f"u_samps_{i}.npy"), u_samples)
 
 print("Successfully trained all models and now saving results!")
 np.save(os.path.join(output_dir, "nn_sample_convergence.npy"), mmd_array)
