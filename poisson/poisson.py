@@ -279,8 +279,8 @@ if __name__ == "__main__":
 
         MAX = misfit.d.norm("linf")
         noise_std_dev = rel_noise * MAX
-        misfit.noise_variance = noise_std_dev * noise_std_dev
-        # misfit.noise_variance = rel_noise
+        # misfit.noise_variance = noise_std_dev * noise_std_dev
+        misfit.noise_variance = rel_noise
         print(f"This is the noise added to observed targets: {misfit.noise_variance}")
 
     else:
@@ -293,11 +293,11 @@ if __name__ == "__main__":
         misfit = hp.PointwiseStateObservation(Vh[hp.STATE], targets)
 
         mtrue = true_model(prior)
-        mtrue_array = get_data(Vh[hp.PARAMETER], mtrue, mesh)
-        np.save(
-            os.path.join(output_root, "true_param_grid.npy"),
-            mtrue_array,
-        )
+        # mtrue_array = get_data(Vh[hp.PARAMETER], mtrue, mesh)
+        # np.save(
+        #     os.path.join(output_root, "true_param_grid.npy"),
+        #     mtrue_array,
+        # )
 
         if inargs["plot"]:
             objs = [
@@ -310,11 +310,11 @@ if __name__ == "__main__":
             plt.show()
 
         utrue = pde.generate_state()
-        utrue_array = get_data(Vh[hp.STATE], utrue, mesh)
-        np.save(
-            os.path.join(output_root, "true_state_grid.npy"),
-            utrue_array,
-        )
+        # utrue_array = get_data(Vh[hp.STATE], utrue, mesh)
+        # np.save(
+        #     os.path.join(output_root, "true_state_grid.npy"),
+        #     utrue_array,
+        # )
 
         x = [utrue, mtrue, None]
         pde.solveFwd(x[hp.STATE], x)
@@ -327,7 +327,7 @@ if __name__ == "__main__":
 
         hp.parRandom.normal_perturb(noise_std_dev, misfit.d)
 
-        data_file("w", target=targets, data=misfit.d.get_local())
+        # data_file("w", target=targets, data=misfit.d.get_local())
 
         if inargs["plot"]:
             vmax = max(utrue.max(), misfit.d.max())
@@ -364,11 +364,11 @@ if __name__ == "__main__":
     solver.parameters["LS"]["c_armijo"] = 1e-4
 
     x = solver.solve([None, m, None])
-    map_array = get_data(Vh[hp.PARAMETER], x[hp.PARAMETER], mesh)
-    np.save(
-        os.path.join(output_root, "map_param_grid.npy"),
-        map_array,
-    )
+    # map_array = get_data(Vh[hp.PARAMETER], x[hp.PARAMETER], mesh)
+    # np.save(
+    #     os.path.join(output_root, "map_param_grid.npy"),
+    #     map_array,
+    # )
 
     if solver.converged:
         print("\nConverged in ", solver.it, " iterations.")
@@ -398,140 +398,140 @@ if __name__ == "__main__":
 
     # a place holder ModPiece for the parameters
     print("Setting up workgraph")
-    # idparam = mm.IdentityOperator(Vh[hp.PARAMETER].dim())
+    idparam = mm.IdentityOperator(Vh[hp.PARAMETER].dim())
 
-    # # log Gaussian Prior ModPiece
-    # gaussprior = hm.BiLaplaceGaussian(prior)
-    # log_gaussprior = gaussprior.AsDensity()
+    # log Gaussian Prior ModPiece
+    gaussprior = hm.BiLaplaceGaussian(prior)
+    log_gaussprior = gaussprior.AsDensity()
 
-    # # parameter to log likelihood Modpiece
-    # param2likelihood = hm.Param2LogLikelihood(model)
+    # parameter to log likelihood Modpiece
+    param2likelihood = hm.Param2LogLikelihood(model)
 
-    # # log target ModPiece
-    # log_target = mm.DensityProduct(2)
+    # log target ModPiece
+    log_target = mm.DensityProduct(2)
 
-    # workgraph = mm.WorkGraph()
+    workgraph = mm.WorkGraph()
 
-    # # Identity operator for the parameters
-    # workgraph.AddNode(idparam, "Identity")
+    # Identity operator for the parameters
+    workgraph.AddNode(idparam, "Identity")
 
-    # # Prior model
-    # workgraph.AddNode(log_gaussprior, "Prior")
+    # Prior model
+    workgraph.AddNode(log_gaussprior, "Prior")
 
-    # # Likelihood model
-    # workgraph.AddNode(param2likelihood, "Likelihood")
+    # Likelihood model
+    workgraph.AddNode(param2likelihood, "Likelihood")
 
-    # # Posterior
-    # workgraph.AddNode(log_target, "Target")
+    # Posterior
+    workgraph.AddNode(log_target, "Target")
 
-    # workgraph.AddEdge("Identity", 0, "Prior", 0)
-    # workgraph.AddEdge("Prior", 0, "Target", 0)
+    workgraph.AddEdge("Identity", 0, "Prior", 0)
+    workgraph.AddEdge("Prior", 0, "Target", 0)
 
-    # workgraph.AddEdge("Identity", 0, "Likelihood", 0)
-    # workgraph.AddEdge("Likelihood", 0, "Target", 1)
+    workgraph.AddEdge("Identity", 0, "Likelihood", 0)
+    workgraph.AddEdge("Likelihood", 0, "Target", 1)
 
-    # print("Finished setting up workgraph")
-    # # Enable caching
-    # # if inargs["MCMC"] not in ("pcn", "hpcn", ""):
-    # log_gaussprior.EnableCache()
-    # param2likelihood.EnableCache()
+    print("Finished setting up workgraph")
+    # Enable caching
+    # if inargs["MCMC"] not in ("pcn", "hpcn", ""):
+    log_gaussprior.EnableCache()
+    param2likelihood.EnableCache()
 
-    # # Construct the problem
-    # post_dens = workgraph.CreateModPiece("Target")
-    # print(f"Starting {inargs['MCMC']['name']} chain...")
+    # Construct the problem
+    post_dens = workgraph.CreateModPiece("Target")
+    print(f"Starting {inargs['MCMC']['name']} chain...")
 
-    # postDens = workgraph.CreateModPiece("Target")
-    # problem = ms.SamplingProblem(postDens)
-    # options = dict()
-    # options["NumSamples"] = inargs["MCMC"]["nsamples"]  # Number of MCMC steps to take
-    # options["BurnIn"] = inargs["MCMC"][
-    #     "burnin"
-    # ]  # Number of steps to throw away as burn in
-    # options["PrintLevel"] = 3
+    postDens = workgraph.CreateModPiece("Target")
+    problem = ms.SamplingProblem(postDens)
+    options = dict()
+    options["NumSamples"] = inargs["MCMC"]["nsamples"]  # Number of MCMC steps to take
+    options["BurnIn"] = inargs["MCMC"][
+        "burnin"
+    ]  # Number of steps to throw away as burn in
+    options["PrintLevel"] = 3
 
-    # method_list = dict()
+    method_list = dict()
 
-    # # h-MALA
-    # opts = options.copy()
-    # # opts.update( {'StepSize':0.00000006} ) #TODO: see if there is auto-tuning of parameter during burn-in. Last run I set this to 0.15
-    # # opts.update({'StepSize': 0.011})
-    # opts.update({"StepSize": 0.11})
-    # gauss_hmala = hm.LAPosteriorGaussian(nu, use_zero_mean=True)
-    # prop = ms.MALAProposal(opts, problem, gauss_hmala)
-    # kern = ms.MHKernel(opts, problem, prop)
-    # sampler = ms.SingleChainMCMC(opts, [kern])
+    # h-MALA
+    opts = options.copy()
+    # opts.update( {'StepSize':0.00000006} ) #TODO: see if there is auto-tuning of parameter during burn-in. Last run I set this to 0.15
+    # opts.update({'StepSize': 0.011})
+    opts.update({"StepSize": 0.11})
+    gauss_hmala = hm.LAPosteriorGaussian(nu, use_zero_mean=True)
+    prop = ms.MALAProposal(opts, problem, gauss_hmala)
+    kern = ms.MHKernel(opts, problem, prop)
+    sampler = ms.SingleChainMCMC(opts, [kern])
 
-    # method_list["hMALA"] = {"Options": opts, "Sampler": sampler}
+    method_list["hMALA"] = {"Options": opts, "Sampler": sampler}
 
-    # # Running MCMC
-    # def draw_x0_numpy(rank, base_seed=12345):
-    #     np.random.seed(base_seed + rank)  # deterministic per chain
+    # Running MCMC
+    def draw_x0_numpy(rank, base_seed=12345):
+        np.random.seed(base_seed + rank)  # deterministic per chain
 
-    #     noise = dl.Vector()
-    #     nu.init_vector(noise, "noise")
+        noise = dl.Vector()
+        nu.init_vector(noise, "noise")
 
-    #     # Fill 'noise' with NumPy-generated values
-    #     nloc = noise.local_size()
-    #     noise_local = np.random.normal(0.0, 1.0, size=nloc)
-    #     noise.set_local(noise_local)
-    #     noise.apply("")
+        # Fill 'noise' with NumPy-generated values
+        nloc = noise.local_size()
+        noise_local = np.random.normal(0.0, 1.0, size=nloc)
+        noise.set_local(noise_local)
+        noise.apply("")
 
-    #     pr_s = model.generate_vector(hp.PARAMETER)
-    #     post_s = model.generate_vector(hp.PARAMETER)
-    #     nu.sample(noise, pr_s, post_s, add_mean=True)
+        pr_s = model.generate_vector(hp.PARAMETER)
+        post_s = model.generate_vector(hp.PARAMETER)
+        nu.sample(noise, pr_s, post_s, add_mean=True)
 
-    #     return hm.dlVector2npArray(post_s)
+        return hm.dlVector2npArray(post_s)
 
-    # x0 = draw_x0_numpy(RANK)
-    # print(f"[chain {RANK}] first 5 entries of x0: {x0[:5]}")
+    x0 = draw_x0_numpy(RANK)
+    print(f"[chain {RANK}] first 5 entries of x0: {x0[:5]}")
 
-    # # Implement MCMC simulations
-    # for mName, method in method_list.items():
-    #     # Run the MCMC sampler
-    #     print(f"Starting to sample from chain {mName}")
-    #     sampler = method["Sampler"]
-    #     samps = sampler.Run([x0])
+    # Implement MCMC simulations
+    for mName, method in method_list.items():
+        # Run the MCMC sampler
+        print(f"Starting to sample from chain {mName}")
+        sampler = method["Sampler"]
+        samps = sampler.Run([x0])
 
-    #     # Save the computed results
-    #     method["Samples"] = samps
-    #     method["ElapsedTime"] = sampler.TotalTime()
+        # Save the computed results
+        method["Samples"] = samps
+        method["ElapsedTime"] = sampler.TotalTime()
 
-    #     kernel = sampler.Kernels()[0]
-    #     if "AcceptanceRate" in dir(kernel):
-    #         method["AcceptRate"] = kernel.AcceptanceRate()
-    #     elif "AcceptanceRates" in dir(kernel):
-    #         method["AcceptRate"] = kernel.AcceptanceRates()
+        kernel = sampler.Kernels()[0]
+        if "AcceptanceRate" in dir(kernel):
+            method["AcceptRate"] = kernel.AcceptanceRate()
+        elif "AcceptanceRates" in dir(kernel):
+            method["AcceptRate"] = kernel.AcceptanceRates()
 
-    #     print(
-    #         "Drawn ",
-    #         options["NumSamples"] - options["BurnIn"] + 1,
-    #         "MCMC samples using",
-    #         mName,
-    #     )
+        print(
+            "Drawn ",
+            options["NumSamples"] - options["BurnIn"] + 1,
+            "MCMC samples using",
+            mName,
+        )
 
-    # samples = method_list["hMALA"]["Samples"].AsMatrix().T
-    # num_vertices = mesh.num_vertices()
-    # num_samples = samples.shape[0]
+    samples = method_list["hMALA"]["Samples"].AsMatrix().T
+    num_vertices = mesh.num_vertices()
+    num_samples = samples.shape[0]
 
-    # vertex_samples = np.zeros(
-    #     (num_samples, num_vertices)
-    # )  # For our example, this should be of size 20,000 x 10201
+    vertex_samples = np.zeros(
+        (num_samples, num_vertices)
+    )  # For our example, this should be of size 20,000 x 10201
 
-    # # wandb.log({"acceptance rate": method_list["MALA"]["AcceptRate"]}) # TODO: When I increase the number of chains, use wandb
+    # wandb.log({"acceptance rate": method_list["MALA"]["AcceptRate"]}) # TODO: When I increase the number of chains, use wandb
 
-    # f = dl.Function(Vh[hp.PARAMETER])
-    # for i in range(num_samples):
-    #     f.vector().set_local(samples[i])
-    #     vertex_samples[i] = f.compute_vertex_values(mesh)
+    f = dl.Function(Vh[hp.PARAMETER])
+    for i in range(num_samples):
+        f.vector().set_local(samples[i])
+        vertex_samples[i] = f.compute_vertex_values(mesh)
 
-    # np.save(
-    #     os.path.join(output_dir, "hmala_samples_grid_delta.npy"),
-    #     vertex_samples,
-    # )
+    np.save(
+        os.path.join(output_dir, "hmala_samples_grid.npy"),
+        vertex_samples,
+    )
 
-    # save_list = method_list.copy()
-    # save_list["hMALA"]["Sampler"] = None
-    # save_list["hMALA"]["Samples"] = vertex_samples
+    save_list = method_list.copy()
+    save_list["hMALA"]["Sampler"] = None
+    save_list["hMALA"]["Samples"] = vertex_samples
 
-    # with open(os.path.join(output_dir, "method-list-hmala-grid-delta.pkl"), "wb") as f:
-    #     pickle.dump(method_list, f)
+    with open(os.path.join(output_dir, "method-list-hmala-grid.pkl"), "wb") as f:
+        pickle.dump(method_list, f)
