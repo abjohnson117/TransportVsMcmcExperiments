@@ -13,6 +13,7 @@ from tqdm.auto import tqdm
 from typing import Callable
 import pickle
 import equinox as eqx
+from ot.sliced import sliced_wasserstein_distance as swd
 
 import os
 
@@ -61,7 +62,9 @@ def get_pca_fns(us):
     mean_us = us.mean(axis=0)
     X = us - mean_us
 
-    U, S, Vt = np.linalg.svd(X / (np.sqrt(train_dim - 1)), full_matrices=False) # Changed from us to X
+    U, S, Vt = np.linalg.svd(
+        X / (np.sqrt(train_dim - 1)), full_matrices=False
+    )  # Changed from us to X
     V = Vt.T
 
     expl_var = (S**2) / (S**2).sum()
@@ -136,7 +139,9 @@ for i in tqdm(range(40)):
     hmala_samps_chain = np.load(hmala_path).reshape(nsamples, flat_length)
     thinned_samps = hmala_samps_chain[::40, :]
     chains.append(thinned_samps)
-hmala_samps = np.vstack(chains) # This is a chain with 20,000 independently drawn samples
+hmala_samps = np.vstack(
+    chains
+)  # This is a chain with 20,000 independently drawn samples
 
 # Load training data
 train_dim = 50000
@@ -145,63 +150,93 @@ us = (np.load("training_dataset/parameters_delta.npy"))[:train_dim, :].reshape(
     train_dim, flat_length
 )
 
-us_ref = us.copy()
+us_ref = (np.load("training_dataset/parameters_delta.npy"))[
+    train_dim : train_dim * 2, :
+].reshape(train_dim, flat_length)
 np.random.shuffle(us_ref)
 
 us_test = (np.load("training_dataset/parameters_delta.npy"))[
-    train_dim : train_dim + nsamples, :
+    2 * train_dim : 2 * train_dim + nsamples, :
 ].reshape(nsamples, flat_length)
 np.random.shuffle(us_test)
 
 ys_normalizer = UnitGaussianNormalizer(ys)
 ys_normalized = ys_normalizer.encode()
 
-sigma = median_heuristic_sigma_jax(us)
+# pca_encode_total, pca_decode_total, k = get_pca_fns(us)
+# us_pca_total = pca_encode(us)
+# us_ref_pca_total = pca_encode(us_ref)
+# us_test_pca = pca_encode_total(us_test)
+# hmala_pca = pca_encode_total(hmala_samps)
+
+pca_encode, pca_decode, k = get_pca_fns(us_ref)
+us_pca = pca_encode(us)
+us_ref_pca = pca_encode(us_ref)
+us_test_pca = pca_encode(us_test)
+hmala_pca = pca_encode(hmala_samps)
+hmala_pca = jnp.asarray(hmala_pca)
+
+sigma = median_heuristic_sigma_jax(us_ref_pca)
 gamma = gamma_from_sigma_jax(sigma)
+gamma = 5.0
 print(f"This is the median heuristic bandwidth: {gamma}")
 
 rbf_kernel = get_gaussianRBF(gamma)
 
 ker = vectorize_kfunc(rbf_kernel)
 
-@jax.jit
-def get_kme(X, Y):
-    return (jnp.mean(ker(X, X)) - jnp.mean(ker(Y,Y))) ** 2 / (jnp.mean(ker(Y,Y))) ** 2
+ker_jit = jax.jit(ker)
 
 @jax.jit
 def MMD(X, Y):
-    return jnp.mean(ker(X, X)) + jnp.mean(ker(Y, Y)) - 2 * jnp.mean(ker(X, Y))
+    x_mean_emb = jnp.mean(ker(X, X))
+    y_mean_emb = jnp.mean(ker(Y, Y))
+    xy_mean_emb = jnp.mean(ker(X, Y))
+    return x_mean_emb + y_mean_emb - 2 * xy_mean_emb
 
-pca_encode_total, pca_decode_total, k = get_pca_fns(us)
-# us_pca_total = pca_encode(us)
-# us_ref_pca_total = pca_encode(us_ref)
-# us_test_pca = pca_encode_total(us_test)
-hmala_pca = pca_encode_total(hmala_samps)
+@jax.jit
+def mean_emb(X):
+    return jnp.mean(ker(X,X))
 
-sample_no_list = [2**i for i in range(1, 15)]
-sample_no_list.append(nsamples)
-sample_no_list.append(30000)
-sample_no_list.append(40000)
-sample_no_list.append(train_dim)
-# sample_no_list = [2, train_dim]
+@jax.jit
+def xy_mean_emb(X, Y):
+    return jnp.mean(ker(X, Y))
+
+
+@jax.jit
+def get_kme(X, Y):
+    return (MMD(X, Y)) ** 2 / (jnp.mean(ker(Y, Y))) ** 2
+
+
+# sample_no_list = [2**i for i in range(1, 15)]
+# sample_no_list.append(nsamples)
+# sample_no_list.append(30000)
+# sample_no_list.append(40000)
+# sample_no_list.append(train_dim)
+sample_no_list = [2, 8, 20000, train_dim]
 
 mmd_array = np.zeros(len(sample_no_list))
 rel_err_array = np.zeros(len(sample_no_list))
-u_mean_array = np.zeros(len(sample_no_list), nx, ny)
+u_mean_array = np.zeros((len(sample_no_list), nx, ny))
+u_var_array = np.zeros((len(sample_no_list), nx, ny))
+mmd_array_no_pca = np.zeros(len(sample_no_list))
+rel_error_no_pca = np.zeros(len(sample_no_list))
 for i, sample_no in tqdm(enumerate(sample_no_list)):
     print("Starting training...")
     y = ys_normalized[1 : (sample_no + 1), :]
-    u = us[1 : (sample_no + 1), :]
-    u_ref = us_ref[1 : (sample_no + 1), :]
+    u_pca = us_pca[1 : (sample_no + 1), :]
+    u_ref_pca = us_ref_pca[1 : (sample_no + 1), :]
 
-    pca_encode, pca_decode, k = get_pca_fns(u)
-    us_pca = pca_encode(u)
-    us_ref_pca = pca_encode(u_ref)
-    us_test_pca = pca_encode(us_test)
+    # pca_encode, pca_decode, k = get_pca_fns(u)
+    # us_pca = pca_encode(u)
+    # us_ref_pca = pca_encode(u_ref)
+    # us_test_pca = pca_encode(us_test)
 
-    target_data = jnp.hstack([y, us_pca])
-    ref_data = jnp.hstack([y, us_ref_pca])
-    print(f"This is the size of target and ref data: {target_data.shape} and {ref_data.shape}")
+    target_data = jnp.hstack([y, u_pca])
+    ref_data = jnp.hstack([y, u_ref_pca])
+    print(
+        f"This is the size of target and ref data: {target_data.shape} and {ref_data.shape}"
+    )
 
     key = random.PRNGKey(seed=np.random.choice(1000))
     key1, key2 = random.split(key=key, num=2)
@@ -209,7 +244,8 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         batch_size = sample_no
     else:
         batch_size = 128
-    steps = 50000
+    # steps = 50000
+    steps = 20000
     print_every = 5000
     yu_dimension = (100, k.item())
     dim = yu_dimension[0] + yu_dimension[1]
@@ -222,15 +258,17 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         num_layers=len(hidden_layer_list) + 1,
         activation_fn=jax.nn.gelu,  # GeLU worked well
     )
-    schedule = optax.warmup_cosine_decay_schedule(
-        init_value=0.0,
-        peak_value=3e-4,
-        warmup_steps=2_000,
-        decay_steps=steps,
-        end_value=1e-5,
-    )
-    optimizer = optax.adamw(schedule)
-    optimizer = optax.chain(optax.clip_by_global_norm(1.0), optax.adamw(schedule))
+    # schedule = optax.warmup_cosine_decay_schedule(
+    #     init_value=0.0,
+    #     peak_value=3e-4,
+    #     warmup_steps=2_000,
+    #     decay_steps=steps,
+    #     end_value=1e-5,
+    # )
+    lr = 1e-4
+    # optimizer = optax.adamw(schedule)
+    optimizer = optax.adamw(lr)
+    # optimizer = optax.chain(optax.clip_by_global_norm(1.0), optax.adamw(schedule))
     interpolant = linear_interpolant
     interpolant_der = linear_interpolant_der
     interpolant_args = {"t": None, "x1": None, "x0": None}
@@ -267,26 +305,45 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     all_samples = cond_samples
 
     u_samples_gen = all_samples[:, yu_dimension[0] :]
+    u_samples_gen = jnp.asarray(u_samples_gen)
     u_samples = pca_decode(u_samples_gen)
-    u_samples_pca = pca_encode_total(u_samples) # To make sure in exactly the correct PCA basis
+    # u_samples_pca = pca_encode_total(u_samples) # To make sure in exactly the correct PCA basis
 
     u_samples = u_samples.reshape(nsamples, nx, ny)
-    u_mean = np.mean(u_samples, axis=0)
+    u_samples = jnp.asarray(u_samples)
+    u_mean = jnp.mean(u_samples, axis=0)
+    u_var = jnp.var(u_samples, axis=0)
     u_mean_array[i] = u_mean
+    u_var_array[i] = u_var
 
     print("Calculating MMD...")
-    mmd_array[i] = MMD(u_samples_pca, hmala_pca)
-    rel_err_array[i] = get_kme(u_samples_pca, hmala_pca)
-    print(f"This is the MMD: {MMD(u_samples_pca, hmala_pca)}")
-    print(f"This is the calculated relative error: {get_kme(u_samples_pca, hmala_pca)}")
-    np.save(os.path.join(output_dir, f"u_samps_{i}.npy"), u_samples_pca)
+    mmd_array[i] = MMD(u_samples_gen, hmala_pca)
+    rel_err_array[i] = get_kme(u_samples_gen, hmala_pca)
+    mmd_array_no_pca[i] = MMD(u_samples.reshape(nsamples, nx * ny), hmala_samps)
+    rel_error_no_pca[i] = get_kme(u_samples.reshape(nsamples, nx * ny), hmala_samps)
+    print(f"This is the MMD: {mmd_array[i]}")
+    print(f"This is the calculated relative error: {rel_err_array[i]}")
+    print(f"This is the MMD (no PCA): {mmd_array_no_pca[i]}")
+    print(f"This is the calculated relative error (no PCA): {rel_error_no_pca[i]}")
+    print(
+        f"This is the sliced Wasserstein distance: {swd(u_samples_gen, hmala_pca, n_projections=100)}"
+    )
+    print(
+        f"This is the relative sliced Wasserstein error: {(swd(u_samples_gen, hmala_pca, n_projections=100)) ** 2 / (np.var(hmala_samps)) ** 2}"
+    )
+    print(f"This is the X mean embedding: {mean_emb(u_samples_gen)}")
+    print(f"This is the Y mean embedding: {mean_emb(hmala_pca)}")
+    print(f"This is the XY mean embedding: {xy_mean_emb(u_samples_gen, hmala_pca)}")
+    print(f"These are the kernel values for gen samples: {ker_jit(u_samples_gen, u_samples_gen)}")
+    print(f"These are the kernel values for hmala samples: {ker_jit(hmala_pca, hmala_pca)}")
+    np.save(os.path.join(output_dir, f"u_samps_{i}.npy"), u_samples_gen)
 
 print("Successfully trained all models and now saving results!")
 np.save(os.path.join(output_dir, "nn_sample_convergence.npy"), mmd_array)
 np.save(os.path.join(output_dir, "nn_sample_convergence_rel_error.npy"), rel_err_array)
 
-print("Making plot...")
-fig, ax = plt.subplots(3, 6, figsize=(16,16))
+print("Making plots...")
+fig, ax = plt.subplots(2, 2, figsize=(16, 16))
 l = 0
 
 for i in range(len(ax)):
@@ -298,4 +355,22 @@ for i in range(len(ax)):
         l += 1
 
 plt.tight_layout()
-plt.savefig(os.path.join(output_dir, "param_field_means.png")) # TODO: Potentially change this to pdf later.
+plt.savefig(
+    os.path.join(output_dir, "param_field_means.png")
+)  # TODO: Potentially change this to pdf later.
+
+fig, ax = plt.subplots(2, 2, figsize=(16, 16))
+l = 0
+
+for i in range(len(ax)):
+    for j in range(len(ax[0, :])):
+        im = ax[i][j].imshow(u_var_array[l], origin="lower", interpolation="bilinear")
+        ax[i][j].set_title(rf"Var with $n = {sample_no_list[l]}$")
+        fig.colorbar(im, ax=ax[i][j], fraction=0.046, pad=0.04)
+
+        l += 1
+
+plt.tight_layout()
+plt.savefig(
+    os.path.join(output_dir, "param_field_variances.png")
+)  # TODO: Potentially change this to pdf later.
