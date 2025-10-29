@@ -33,12 +33,17 @@ from triangular_transport.flows.loss_functions import vec_field_loss
 from triangular_transport.networks.flow_networks import MLP
 from triangular_transport.flows.methods.utils import UnitGaussianNormalizer
 from triangular_transport.flows.dataloaders import gaussian_reference_sampler
-from triangular_transport.kernels.kernel_tools import get_gaussianRBF, vectorize_kfunc
+from triangular_transport.kernels.kernel_tools import (
+    get_gaussianRBF,
+    vectorize_kfunc,
+    get_sum_of_kernels,
+)
 
 import json
 import h5py
 
 import argparse
+import wandb
 
 # plt.style.use("ggplot")
 
@@ -50,6 +55,19 @@ jax.config.update("jax_default_device", jax.devices()[1])
 RANK = 0
 SIZE = int(os.environ.get("OMPI_COMM_WORLD_SIZE", os.environ.get("PMI_SIZE", 1)))
 
+configs = {
+    "dataset": "darcy_flow_si_hmala",
+    "hidden_layer": 512,
+    "interpolant": trig_interpolant,
+    "interpolant_der": trig_interpolant_der,
+    "activation_fn": jax.nn.gelu,
+}
+
+run = wandb.init(
+    # set the wandb project where this run will be logged
+    project='darcy_flow_si_hmala',
+    config=configs
+)
 
 def read_data_h5(path="data.h5"):
     with h5py.File(path, "r") as f:
@@ -171,21 +189,32 @@ ys_normalized = ys_normalizer.encode()
 
 pca_encode, pca_decode, k = get_pca_fns(us_ref)
 us_pca = pca_encode(us)
+us_pca = jnp.asarray(us_pca)
 us_ref_pca = pca_encode(us_ref)
+us_ref_pca = jnp.asarray(us_ref_pca)
 us_test_pca = pca_encode(us_test)
+us_test_pca = jnp.asarray(us_test_pca)
 hmala_pca = pca_encode(hmala_samps)
 hmala_pca = jnp.asarray(hmala_pca)
 
-sigma = median_heuristic_sigma_jax(us_ref_pca)
-gamma = gamma_from_sigma_jax(sigma)
-gamma = 5.0
+gamma = median_heuristic_sigma_jax(us_ref_pca, hmala_pca)
+# gamma = gamma_from_sigma_jax(sigma)
+# gamma = 5.0
 print(f"This is the median heuristic bandwidth: {gamma}")
 
-rbf_kernel = get_gaussianRBF(gamma)
+k1 = get_gaussianRBF(gamma)
+k2 = get_gaussianRBF(gamma - 6.0)
+k3 = get_gaussianRBF(gamma - 3.0)
+k4 = get_gaussianRBF(gamma + 3.0)
+k5 = get_gaussianRBF(gamma + 6.0)
+c1 = [0.2] * 5
+kernels = [k1, k2, k3, k4, k5]
+ker = get_sum_of_kernels(kernels, c1)
 
-ker = vectorize_kfunc(rbf_kernel)
+ker = vectorize_kfunc(ker)
 
 ker_jit = jax.jit(ker)
+
 
 @jax.jit
 def MMD(X, Y):
@@ -194,9 +223,11 @@ def MMD(X, Y):
     xy_mean_emb = jnp.mean(ker(X, Y))
     return x_mean_emb + y_mean_emb - 2 * xy_mean_emb
 
+
 @jax.jit
 def mean_emb(X):
-    return jnp.mean(ker(X,X))
+    return jnp.mean(ker(X, X))
+
 
 @jax.jit
 def xy_mean_emb(X, Y):
@@ -208,12 +239,24 @@ def get_kme(X, Y):
     return (MMD(X, Y)) ** 2 / (jnp.mean(ker(Y, Y))) ** 2
 
 
-# sample_no_list = [2**i for i in range(1, 15)]
-# sample_no_list.append(nsamples)
-# sample_no_list.append(30000)
-# sample_no_list.append(40000)
-# sample_no_list.append(train_dim)
-sample_no_list = [2, 8, 20000, train_dim]
+print(
+    f"This is the MMD between the prior and hmala: {MMD(us_ref_pca[np.random.choice(len(us_ref_pca), (20000,)), :], hmala_pca)}"
+)
+
+seed = 42
+n_projections = 1024
+random_idxs = np.random.choice(len(us_ref_pca), (20000,))
+base_swd = swd(
+    us_ref_pca[random_idxs, :], hmala_pca, n_projections=n_projections, seed=seed
+)
+print(f"This is the base swd: {base_swd}")
+
+sample_no_list = [2**i for i in range(1, 15)]
+sample_no_list.append(nsamples)
+sample_no_list.append(30000)
+sample_no_list.append(40000)
+sample_no_list.append(train_dim)
+# sample_no_list = [2, 8, 20000, train_dim]
 
 mmd_array = np.zeros(len(sample_no_list))
 rel_err_array = np.zeros(len(sample_no_list))
@@ -245,32 +288,32 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     else:
         batch_size = 128
     # steps = 50000
-    steps = 20000
+    steps = 50000
     print_every = 5000
     yu_dimension = (100, k.item())
     dim = yu_dimension[0] + yu_dimension[1]
-    hidden_layer_list = [512] * 4
+    hidden_layer_list = [configs["hidden_layer"]] * 4
     model = MLP(
         key=key2,
         dim=dim,
         time_varying=True,
         w=hidden_layer_list,
         num_layers=len(hidden_layer_list) + 1,
-        activation_fn=jax.nn.gelu,  # GeLU worked well
+        activation_fn=configs["activation_fn"],  # GeLU worked well
     )
-    # schedule = optax.warmup_cosine_decay_schedule(
-    #     init_value=0.0,
-    #     peak_value=3e-4,
-    #     warmup_steps=2_000,
-    #     decay_steps=steps,
-    #     end_value=1e-5,
-    # )
-    lr = 1e-4
-    # optimizer = optax.adamw(schedule)
-    optimizer = optax.adamw(lr)
-    # optimizer = optax.chain(optax.clip_by_global_norm(1.0), optax.adamw(schedule))
-    interpolant = linear_interpolant
-    interpolant_der = linear_interpolant_der
+    schedule = optax.warmup_cosine_decay_schedule(
+        init_value=0.0,
+        peak_value=3e-4,
+        warmup_steps=2_000,
+        decay_steps=steps,
+        end_value=1e-5,
+    )
+    # lr = 1e-4
+    optimizer = optax.adamw(schedule)
+    # optimizer = optax.adamw(lr)
+    optimizer = optax.chain(optax.clip_by_global_norm(1.0), optax.adamw(schedule))
+    interpolant = configs["interpolant"]
+    interpolant_der = configs["interpolant_der"]
     interpolant_args = {"t": None, "x1": None, "x0": None}
 
     trainer = NNTrainer(
@@ -293,10 +336,6 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     )
     ytrue_flat = yobs.copy()
     ytrue_flat_normalized = ys_normalizer.encode(ytrue_flat)
-    # ys_test_normalized = jnp.full(
-    #     (nsamples, ytrue_flat_normalized.shape[0]), ytrue_flat_normalized
-    # )
-    # x0_test = jnp.hstack([ys_test_normalized, us_test_pca])
 
     cond_values = ytrue_flat_normalized
     cond_samples = trainer.conditional_sample(
@@ -318,7 +357,12 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
 
     print("Calculating MMD...")
     mmd_array[i] = MMD(u_samples_gen, hmala_pca)
-    rel_err_array[i] = get_kme(u_samples_gen, hmala_pca)
+    rel_err_array[i] = (
+        swd(u_samples_gen, hmala_pca, n_projections=n_projections, seed=seed) / base_swd
+    )
+    wandb.log({"relative error (swd)": rel_err_array[i]})
+    # ref_indices = np.random.choice(20000)
+    # rel_err_array[i] = (MMD(u_samples_gen, us_ref_pca[ref_indices, :]) ** 2) / (MMD(hmala_samps, us_ref_pca[ref_indices, :]) ** 2)
     mmd_array_no_pca[i] = MMD(u_samples.reshape(nsamples, nx * ny), hmala_samps)
     rel_error_no_pca[i] = get_kme(u_samples.reshape(nsamples, nx * ny), hmala_samps)
     print(f"This is the MMD: {mmd_array[i]}")
@@ -334,8 +378,12 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     print(f"This is the X mean embedding: {mean_emb(u_samples_gen)}")
     print(f"This is the Y mean embedding: {mean_emb(hmala_pca)}")
     print(f"This is the XY mean embedding: {xy_mean_emb(u_samples_gen, hmala_pca)}")
-    print(f"These are the kernel values for gen samples: {ker_jit(u_samples_gen, u_samples_gen)}")
-    print(f"These are the kernel values for hmala samples: {ker_jit(hmala_pca, hmala_pca)}")
+    print(
+        f"These are the kernel values for gen samples: {ker_jit(u_samples_gen, u_samples_gen)}"
+    )
+    print(
+        f"These are the kernel values for hmala samples: {ker_jit(hmala_pca, hmala_pca)}"
+    )
     np.save(os.path.join(output_dir, f"u_samps_{i}.npy"), u_samples_gen)
 
 print("Successfully trained all models and now saving results!")
@@ -343,7 +391,8 @@ np.save(os.path.join(output_dir, "nn_sample_convergence.npy"), mmd_array)
 np.save(os.path.join(output_dir, "nn_sample_convergence_rel_error.npy"), rel_err_array)
 
 print("Making plots...")
-fig, ax = plt.subplots(2, 2, figsize=(16, 16))
+fig, ax = plt.subplots(3, 6, figsize=(16, 16))
+# fig, ax = plt.subplots(2, 2, figsize=(16, 16))
 l = 0
 
 for i in range(len(ax)):
@@ -358,8 +407,10 @@ plt.tight_layout()
 plt.savefig(
     os.path.join(output_dir, "param_field_means.png")
 )  # TODO: Potentially change this to pdf later.
+plt.close(fig)
 
-fig, ax = plt.subplots(2, 2, figsize=(16, 16))
+fig, ax = plt.subplots(3, 6, figsize=(16, 16))
+# fig, ax = plt.subplots(2, 2, figsize=(16, 16))
 l = 0
 
 for i in range(len(ax)):
@@ -374,3 +425,14 @@ plt.tight_layout()
 plt.savefig(
     os.path.join(output_dir, "param_field_variances.png")
 )  # TODO: Potentially change this to pdf later.
+plt.close(fig)
+
+plt.plot(sample_no_list, rel_err_array)
+# plt.yscale("log")
+# plt.xscale("log")
+plt.xlabel(r"$N$")
+plt.ylabel(
+    r"$\frac{\mathrm{MMD}^2(\mu^N_{\mathrm{SI}}, \mu^N_{\mathrm{hMALA}})}{||\mu^N_{\mathrm{hMALA}}||^2_{\mathcal{H}}}$"
+)
+plt.title("Relative Error vs Sample Size")
+plt.savefig(os.path.join(output_dir, "rel_error_plot.png"))
