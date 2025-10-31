@@ -140,7 +140,6 @@ run = wandb.init(
     config=configs,
 )
 
-
 def read_data_h5(path="data.h5"):
     with h5py.File(path, "r") as f:
         targets = f["/target"][...]
@@ -180,7 +179,7 @@ def get_pca_fns(us):
     def extra_cov():
         return V_res @ np.diag(S_res**2) @ V_res.T
 
-    return pca_encode, pca_decode, k, sample_extra, extra_cov
+    return pca_encode, pca_decode, k, sample_extra, extra_cov, S
 
 
 def median_heuristic_sigma_jax(X, Y=None, max_points=5000, seed=0):
@@ -268,7 +267,7 @@ ys_normalized = ys_normalizer.encode()
 # us_test_pca = pca_encode_total(us_test)
 # hmala_pca = pca_encode_total(hmala_samps)
 
-pca_encode, pca_decode, k, sample_extra, extra_cov = get_pca_fns(us_ref)
+pca_encode, pca_decode, k, sample_extra, extra_cov, S = get_pca_fns(us_ref)
 extra_samp = sample_extra(1).reshape(nx, ny)
 extra_pca_cov = extra_cov()
 extra_pca_var = np.diag(extra_pca_cov).reshape(nx, ny)
@@ -334,10 +333,15 @@ random_idxs = np.random.choice(len(us_ref_pca), (20000,))
 base_swd = swd(
     us_ref[random_idxs, :], hmala_samps, n_projections=n_projections, seed=seed
 )
+print(
+    f"This is the MMD relative error between the prior and hmala: {get_kme(us_ref[random_idxs, :], hmala_samps)}"
+)
 # base_swd = swd(
 #     us_ref_pca[random_idxs, :], hmala_pca, n_projections=n_projections, seed=seed
 # )
 print(f"This is the base swd: {base_swd}")
+
+D_mask = jnp.concatenate([jnp.zeros(ys_normalized.shape[1]), S])
 
 sample_no_list = [2**i for i in range(1, 15)]
 sample_no_list.append(nsamples)
@@ -348,6 +352,7 @@ sample_no_list.append(train_dim)
 
 mmd_array = np.zeros(len(sample_no_list))
 rel_err_array = np.zeros(len(sample_no_list))
+prior_rel_err = np.zeros(len(sample_no_list))
 u_mean_array = np.zeros((len(sample_no_list), nx, ny))
 u_var_array = np.zeros((len(sample_no_list), nx, ny))
 mmd_array_no_pca = np.zeros(len(sample_no_list))
@@ -440,7 +445,10 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     ytrue_flat_normalized = ys_normalizer.encode(ytrue_flat)
 
     cond_values = ytrue_flat_normalized
-    solver_args = {"saveat": "t1"}
+    if sample_no <= 1000:
+        solver_args = {"saveat": "t1", "D_mask": D_mask, "eps":0.0001}
+    else:
+        solver_args = {"saveat": "t1"}
     cond_samples = trainer.conditional_sample(
         cond_values=cond_values,
         u0_cond=us_test_pca,
@@ -464,6 +472,16 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     u_mean_array[i] = u_mean
     u_var_array[i] = u_var
 
+    fig, ax = plt.subplots(1, 3, figsize=(12,12))
+    ax[0].imshow(u_mean, origin="lower", interpolation="bilinear")
+    ax[0].set_title("Mean")
+    ax[1].imshow(u_var, origin="lower", interpolation="bilinear")
+    ax[1].set_title("Variance")
+    ax[2].imshow(utrue, origin="lower", interpolation="bilinear")
+    ax[2].set_title("True")
+    wandb.log({"mean_variance_plot": wandb.Image(fig)})
+    plt.close(fig)
+
     print("Calculating MMD...")
     mmd_array[i] = MMD(u_samples_gen, hmala_pca)
     # rel_err_array[i] = (
@@ -478,12 +496,14 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         )
         / base_swd
     )
-    wandb.log({"relative error (swd)": rel_err_array[i]})
+    wandb.log({"relative error (swd)": rel_err_array[i]}, step=sample_no)
+    prior_rel_err[i] = get_kme(u_samples.reshape(nsamples, nx * ny), us_ref[random_idxs, :])
+    wandb.log({"prior relative error (mmd)": prior_rel_err[i]}, step=sample_no)
     # ref_indices = np.random.choice(20000)
     # rel_err_array[i] = (MMD(u_samples_gen, us_ref_pca[ref_indices, :]) ** 2) / (MMD(hmala_samps, us_ref_pca[ref_indices, :]) ** 2)
     mmd_array_no_pca[i] = MMD(u_samples.reshape(nsamples, nx * ny), hmala_samps)
     rel_error_no_pca[i] = get_kme(u_samples.reshape(nsamples, nx * ny), hmala_samps)
-    wandb.log({"relative error (mmd)": rel_error_no_pca[i]})
+    wandb.log({"relative error (mmd)": rel_error_no_pca[i]}, step=sample_no)
     print(f"This is the MMD: {mmd_array[i]}")
     print(f"This is the calculated relative error: {rel_err_array[i]}")
     print(f"This is the MMD (no PCA): {mmd_array_no_pca[i]}")
@@ -508,6 +528,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
 print("Successfully trained all models and now saving results!")
 np.save(os.path.join(output_dir, "nn_sample_convergence.npy"), mmd_array)
 np.save(os.path.join(output_dir, "nn_sample_convergence_rel_error.npy"), rel_err_array)
+np.save(os.path.join(output_dir, "nn_sample_convergence_rel_error_mmd.npy"), rel_error_no_pca)
 
 print("Making plots...")
 fig, ax = plt.subplots(3, 6, figsize=(16, 16))
