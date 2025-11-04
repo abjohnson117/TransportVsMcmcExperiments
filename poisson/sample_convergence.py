@@ -32,7 +32,7 @@ from triangular_transport.flows.interpolants import (
 )
 from triangular_transport.flows.loss_functions import vec_field_loss
 from triangular_transport.flows.methods.utils import UnitGaussianNormalizer
-from triangular_transport.networks import MLP
+from triangular_transport.networks.flow_networks import MLP
 from triangular_transport.flows.dataloaders import gaussian_reference_sampler
 from triangular_transport.kernels.kernel_tools import (
     get_gaussianRBF,

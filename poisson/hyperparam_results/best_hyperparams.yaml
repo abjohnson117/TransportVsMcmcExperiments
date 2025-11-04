@@ -1,0 +1,74 @@
+activation: !!python/object/apply:numpy._core.multiarray.scalar
+- !!python/object/apply:numpy.dtype
+  args:
+  - U4
+  - false
+  - true
+  state: !!python/tuple
+  - 3
+  - <
+  - null
+  - null
+  - null
+  - 16
+  - 4
+  - 8
+- !!binary |
+  ZwAAAGUAAABsAAAAdQAAAA==
+batch_size: 379
+hidden_layer: 623
+interpolant: !!python/object/apply:numpy._core.multiarray.scalar
+- !!python/object/apply:numpy.dtype
+  args:
+  - U19
+  - false
+  - true
+  state: !!python/tuple
+  - 3
+  - <
+  - null
+  - null
+  - null
+  - 76
+  - 4
+  - 8
+- !!binary |
+  cwAAAGkAAABnAAAAbQAAAG8AAABpAAAAZAAAAF8AAABpAAAAbgAAAHQAAABlAAAAcgAAAHAAAABv
+  AAAAbAAAAGEAAABuAAAAdAAAAA==
+interpolant_der: !!python/object/apply:numpy._core.multiarray.scalar
+- !!python/object/apply:numpy.dtype
+  args:
+  - U23
+  - false
+  - true
+  state: !!python/tuple
+  - 3
+  - <
+  - null
+  - null
+  - null
+  - 92
+  - 4
+  - 8
+- !!binary |
+  cwAAAGkAAABnAAAAbQAAAG8AAABpAAAAZAAAAF8AAABpAAAAbgAAAHQAAABlAAAAcgAAAHAAAABv
+  AAAAbAAAAGEAAABuAAAAdAAAAF8AAABkAAAAZQAAAHIAAAA=
+num_hidden_layers: 10
+optimizer: !!python/object/apply:numpy._core.multiarray.scalar
+- !!python/object/apply:numpy.dtype
+  args:
+  - U7
+  - false
+  - true
+  state: !!python/tuple
+  - 3
+  - <
+  - null
+  - null
+  - null
+  - 28
+  - 4
+  - 8
+- !!binary |
+  YQAAAGQAAABhAAAAZwAAAHIAAABhAAAAZAAAAA==
+peak_value: 0.0064240033048
