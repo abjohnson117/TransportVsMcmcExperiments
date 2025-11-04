@@ -32,7 +32,8 @@ from triangular_transport.flows.interpolants import (
 )
 from triangular_transport.flows.loss_functions import vec_field_loss
 from triangular_transport.flows.methods.utils import UnitGaussianNormalizer
-from triangular_transport.networks.flow_networks import MLP
+
+# from triangular_transport.networks.flow_networks import MLP
 from triangular_transport.flows.dataloaders import gaussian_reference_sampler
 from triangular_transport.kernels.kernel_tools import (
     get_gaussianRBF,
@@ -48,67 +49,71 @@ import wandb
 
 # plt.style.use("ggplot")
 
-# class MLP(eqx.Module):
-#     layers: List[eqx.nn.Linear]         # main hidden layers
-#     skips:  List[eqx.nn.Linear | None]  # projections for residuals (or None for identity)
-#     out:    eqx.nn.Linear
-#     activation_fn: List[Callable]
 
-#     def __init__(
-#         self,
-#         key: jax.random.PRNGKey,
-#         dim: int,
-#         out_dim: int | None = None,
-#         num_layers: int = 4,
-#         activation_fn: List[Callable] | Callable = jax.nn.gelu,
-#         w: int | List[int] = 64,
-#         time_varying: bool = False,
-#     ):
-#         if out_dim is None:
-#             out_dim = dim
+class MLP(eqx.Module):
+    layers: List[eqx.nn.Linear]  # main hidden layers
+    skips: List[
+        eqx.nn.Linear | None
+    ]  # projections for residuals (or None for identity)
+    out: eqx.nn.Linear
+    activation_fn: List[Callable]
 
-#         # normalize activation list
-#         if isinstance(activation_fn, list):
-#             if len(activation_fn) == 1:
-#                 activation_fn *= num_layers - 1
-#         else:
-#             activation_fn = [activation_fn] * (num_layers - 1)
-#         self.activation_fn = activation_fn
+    def __init__(
+        self,
+        key: jax.random.PRNGKey,
+        dim: int,
+        out_dim: int | None = None,
+        num_layers: int = 4,
+        activation_fn: List[Callable] | Callable = jax.nn.gelu,
+        w: int | List[int] = 64,
+        time_varying: bool = False,
+    ):
+        if out_dim is None:
+            out_dim = dim
 
-#         # normalize widths
-#         if isinstance(w, list):
-#             if len(w) == 1:
-#                 w *= (num_layers - 1)
-#             widths = w
-#         else:
-#             widths = [w] * (num_layers - 1)
+        # normalize activation list
+        if isinstance(activation_fn, list):
+            if len(activation_fn) == 1:
+                activation_fn *= num_layers - 1
+        else:
+            activation_fn = [activation_fn] * (num_layers - 1)
+        self.activation_fn = activation_fn
 
-#         k = jax.random.split(key, 2 * num_layers)  # enough keys
+        # normalize widths
+        if isinstance(w, list):
+            if len(w) == 1:
+                w *= num_layers - 1
+            widths = w
+        else:
+            widths = [w] * (num_layers - 1)
 
-#         in_dim0 = dim + (1 if time_varying else 0)
+        k = jax.random.split(key, 2 * num_layers)  # enough keys
 
-#         # build hidden layers + skip projections
-#         self.layers = []
-#         self.skips  = []
-#         in_dim = in_dim0
-#         for i, width in enumerate(widths):
-#             self.layers.append(eqx.nn.Linear(in_dim, width, key=k[i]))
-#             # projection: identity if dims match, else linear map
-#             if in_dim == width:
-#                 self.skips.append(None)  # treat as identity in __call__
-#             else:
-#                 self.skips.append(eqx.nn.Linear(in_dim, width, key=k[i + num_layers]))
-#             in_dim = width
+        in_dim0 = dim + (1 if time_varying else 0)
 
-#         # output layer
-#         self.out = eqx.nn.Linear(in_dim, out_dim, key=k[-1])
+        # build hidden layers + skip projections
+        self.layers = []
+        self.skips = []
+        in_dim = in_dim0
+        for i, width in enumerate(widths):
+            self.layers.append(eqx.nn.Linear(in_dim, width, key=k[i]))
+            # projection: identity if dims match, else linear map
+            if in_dim == width:
+                self.skips.append(None)  # treat as identity in __call__
+            else:
+                self.skips.append(eqx.nn.Linear(in_dim, width, key=k[i + num_layers]))
+            in_dim = width
 
-#     def __call__(self, x):
-#         for layer, skip, act in zip(self.layers, self.skips, self.activation_fn):
-#             h = act(layer(x))
-#             s = x if skip is None else skip(x)
-#             x = h + s                    # projected residual
-#         return self.out(x)
+        # output layer
+        self.out = eqx.nn.Linear(in_dim, out_dim, key=k[-1])
+
+    def __call__(self, x):
+        for layer, skip, act in zip(self.layers, self.skips, self.activation_fn):
+            h = act(layer(x))
+            s = x if skip is None else skip(x)
+            x = h + s  # projected residual
+        return self.out(x)
+
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
@@ -120,17 +125,22 @@ SIZE = int(os.environ.get("OMPI_COMM_WORLD_SIZE", os.environ.get("PMI_SIZE", 1))
 
 configs = {
     "dataset": "darcy_flow_si_hmala",
-    "hidden_layer": 512,
-    "interpolant": trig_interpolant,
-    "interpolant_der": trig_interpolant_der,
+    "hidden_layer": 623,
+    "interpolant": sigmoid_interpolant,
+    "interpolant_der": sigmoid_interpolant_der,
     "activation_fn": jax.nn.gelu,
+    "batch_size": 379,
+    "num_hidden_layers": 10,
+    "optimizer": optax.adagrad,
+    "peak_value": 0.0064240033048,
 }
 
 run = wandb.init(
     # set the wandb project where this run will be logged
-    project='Poisson - SI v hMALA, no PCA',
-    config=configs
+    project="Poisson - SI v hMALA, no PCA",
+    config=configs,
 )
+
 
 def read_data_h5(path="data.h5"):
     with h5py.File(path, "r") as f:
@@ -162,12 +172,12 @@ def get_pca_fns(us):
     def pca_decode(z):
         # undo whitening
         return mean_us + (z * S) @ V.T
-    
+
     def sample_extra(n=1):
-        eps = np.random.randn(n, S_res.shape[0])    # ~ N(0, I)
-        coeffs = eps * S_res                        # ~ N(0, diag(S_res^2))
+        eps = np.random.randn(n, S_res.shape[0])  # ~ N(0, I)
+        coeffs = eps * S_res  # ~ N(0, diag(S_res^2))
         return coeffs @ V_res.T
-    
+
     def extra_cov():
         return V_res @ np.diag(S_res**2) @ V_res.T
 
@@ -362,13 +372,13 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     if sample_no < 128:
         batch_size = sample_no
     else:
-        batch_size = 128
+        batch_size = configs["batch_size"]
     # steps = 50000
-    steps = 50000
+    steps = 10000
     print_every = 5000
     yu_dimension = (100, k.item())
     dim = yu_dimension[0] + yu_dimension[1]
-    hidden_layer_list = [configs["hidden_layer"]] * 4
+    hidden_layer_list = [configs["hidden_layer"]] * configs["num_hidden_layers"]
     model = MLP(
         key=key2,
         dim=dim,
@@ -379,15 +389,16 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     )
     schedule = optax.warmup_cosine_decay_schedule(
         init_value=0.0,
-        peak_value=3e-4,
+        peak_value=configs["peak_value"],
         warmup_steps=2_000,
         decay_steps=steps,
         end_value=1e-5,
     )
     # lr = 1e-4
-    optimizer = optax.adamw(schedule)
+    # optimizer = optax.adamw(schedule)
     # optimizer = optax.adamw(lr)
-    optimizer = optax.chain(optax.clip_by_global_norm(1.0), optax.adamw(schedule))
+    opt = configs["optimizer"]
+    optimizer = optax.chain(optax.clip_by_global_norm(1.0), opt(schedule))
     interpolant = configs["interpolant"]
     interpolant_der = configs["interpolant_der"]
     interpolant_args = {"t": None, "x1": None, "x0": None}
@@ -439,14 +450,20 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     #     swd(u_samples_gen, hmala_pca, n_projections=n_projections, seed=seed) / base_swd
     # )
     rel_err_array[i] = (
-        swd(u_samples.reshape(nsamples, nx * ny), jnp.asarray(hmala_samps), n_projections=n_projections, seed=seed) / base_swd
+        swd(
+            u_samples.reshape(nsamples, nx * ny),
+            jnp.asarray(hmala_samps),
+            n_projections=n_projections,
+            seed=seed,
+        )
+        / base_swd
     )
-    wandb.log({"relative error (swd)": rel_err_array[i]})
+    wandb.log({"relative error (swd)": rel_err_array[i]}, step=sample_no)
     # ref_indices = np.random.choice(20000)
     # rel_err_array[i] = (MMD(u_samples_gen, us_ref_pca[ref_indices, :]) ** 2) / (MMD(hmala_samps, us_ref_pca[ref_indices, :]) ** 2)
     mmd_array_no_pca[i] = MMD(u_samples.reshape(nsamples, nx * ny), hmala_samps)
     rel_error_no_pca[i] = get_kme(u_samples.reshape(nsamples, nx * ny), hmala_samps)
-    wandb.log({"relative error (mmd)": rel_error_no_pca[i]})
+    wandb.log({"relative error (mmd)": rel_error_no_pca[i]}, step=sample_no)
     print(f"This is the MMD: {mmd_array[i]}")
     print(f"This is the calculated relative error: {rel_err_array[i]}")
     print(f"This is the MMD (no PCA): {mmd_array_no_pca[i]}")

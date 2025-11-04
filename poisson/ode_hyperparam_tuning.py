@@ -344,12 +344,6 @@ class SiOdeSmac:
 
 configs = {"dataset": "darcy_flow_si_hmala"}
 
-run = wandb.init(
-    # set the wandb project where this run will be logged
-    project="Poisson - SI hyperparam tuning",
-    config=configs,
-)
-
 sep = "\n" + "#" * 80 + "\n"
 output_root = "hyperparam_results"
 os.makedirs(output_root, exist_ok=True)
@@ -424,47 +418,73 @@ steps = 10000
 yu_dimension = (ys_normalized.shape[1], k.item())
 train_data = jnp.hstack([ys_normalized, us_pca])
 x0_data = jnp.hstack([ys_normalized, us_ref_pca])
+sample_no_list = [2**i for i in range(1, 15)]
+sample_no_list.append(nsamples)
+sample_no_list.append(30000)
+sample_no_list.append(40000)
+sample_no_list.append(train_dim)
+rel_error_array = np.zeros(len(sample_no_list))
 
-regressor = SiOdeSmac(
-    train_dim=train_dim,
-    steps=steps,
-    train_data=train_data,
-    x0_data=x0_data,
-    yu_dimension=yu_dimension,
-    interpolant_args=interpolant_args,
-)
+for i, sample_no in enumerate(sample_no_list):
+    run = wandb.init(
+        # set the wandb project where this run will be logged
+        project="Poisson - SI hyperparam tuning",
+        name=f"iter={i}_n={sample_no}",
+        group="sweep",
+        reinit=True,
+        config={"iter": i, "n":sample_no, **configs},
+        settings=wandb.Settings(start_method="thread")
+    )
+    train_data_iter = train_data[1: (sample_no + 1), :]
+    x0_data_iter = x0_data[1: (sample_no + 1), :]
 
-scenario = Scenario(
-    regressor.configspace,
-    n_trials=500,
-    deterministic=True,
-)
+    regressor = SiOdeSmac(
+        train_dim=train_dim,
+        steps=steps,
+        train_data=train_data,
+        x0_data=x0_data,
+        yu_dimension=yu_dimension,
+        interpolant_args=interpolant_args,
+    )
 
-initial_design = HyperparameterOptimizationFacade.get_initial_design(
-    scenario, n_configs=5
-)
+    scenario = Scenario(
+        regressor.configspace,
+        n_trials=150,
+        deterministic=True,
+    )
 
-print("Starting smac routine...")
-smac = HyperparameterOptimizationFacade(
-    scenario,
-    regressor.train,
-    initial_design=initial_design,
-    overwrite=True,
-)
+    initial_design = HyperparameterOptimizationFacade.get_initial_design(
+        scenario, n_configs=7
+    )
 
-incumbent = smac.optimize()
+    print("Starting smac routine...")
+    smac = HyperparameterOptimizationFacade(
+        scenario,
+        regressor.train,
+        initial_design=initial_design,
+        overwrite=True,
+    )
 
-default_loss = smac.validate(regressor.configspace.get_default_configuration())
-print(f"Default loss: {default_loss}")
+    incumbent = smac.optimize()
 
-incumbent_loss = smac.validate(incumbent)
-print(f"Incumbent loss: {incumbent_loss}")
+    default_loss = smac.validate(regressor.configspace.get_default_configuration())
+    print(f"Default loss: {default_loss}")
 
-best_hyperparams = dict(incumbent)
+    incumbent_loss = smac.validate(incumbent)
+    print(f"Incumbent loss: {incumbent_loss}")
+    rel_error_array[i] = incumbent_loss
 
-print(f"These are the best hyperparameters selected: {best_hyperparams}")
-save_path = os.path.join(output_root, "best_hyperparams.yaml")
-with open(save_path, "w") as f:
-    yaml.dump(best_hyperparams, f, default_flow_style=False)
+    best_hyperparams = dict(incumbent)
 
-print(f"Best hyperparameters saved to {save_path}")
+    print(f"These are the best hyperparameters selected: {best_hyperparams}")
+    iter_folder = os.path.join(output_root, f"iteration_{i}")
+    os.makedirs(iter_folder, exist_ok=True)
+    save_path = os.path.join(iter_folder, "best_hyperparams.pkl")
+    with open(save_path, "w") as f:
+        pickle.dump(best_hyperparams, f)
+
+
+    print(f"Best hyperparameters saved to {save_path}")
+
+np.save(os.path.join(output_root, "incumbent_loss.npy"), rel_error_array)
+print("Code terminated")
