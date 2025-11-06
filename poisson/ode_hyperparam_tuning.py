@@ -441,8 +441,8 @@ for i, sample_no in enumerate(sample_no_list):
     regressor = SiOdeSmac(
         train_dim=train_dim,
         steps=steps,
-        train_data=train_data,
-        x0_data=x0_data,
+        train_data=train_data_iter,
+        x0_data=x0_data_iter,
         yu_dimension=yu_dimension,
         interpolant_args=interpolant_args,
     )
@@ -480,7 +480,7 @@ for i, sample_no in enumerate(sample_no_list):
     iter_folder = os.path.join(output_root, f"iteration_{i}")
     os.makedirs(iter_folder, exist_ok=True)
     save_path = os.path.join(iter_folder, "best_hyperparams.pkl")
-    with open(save_path, "w") as f:
+    with open(save_path, "wb") as f:
         pickle.dump(best_hyperparams, f)
 
 

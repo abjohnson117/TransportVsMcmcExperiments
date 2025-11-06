@@ -366,30 +366,42 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     print(
         f"This is the size of target and ref data: {target_data.shape} and {ref_data.shape}"
     )
+    with open(f"hyperparam_results/iteration_{i}/best_hyperparams.pkl", "rb") as f:
+        hyperparams = pickle.load(f)
 
     key = random.PRNGKey(seed=np.random.choice(1000))
     key1, key2 = random.split(key=key, num=2)
-    if sample_no < 128:
-        batch_size = sample_no
-    else:
-        batch_size = configs["batch_size"]
+    # if sample_no < 128:
+    #     batch_size = sample_no
+    # else:
+    #     batch_size = configs["batch_size"]
+    batch_size = hyperparams["batch_size"]
     # steps = 50000
-    steps = 10000
+    steps = 15000
     print_every = 5000
     yu_dimension = (100, k.item())
     dim = yu_dimension[0] + yu_dimension[1]
-    hidden_layer_list = [configs["hidden_layer"]] * configs["num_hidden_layers"]
+    hidden_layer_list = [hyperparams["hidden_layer"]] * hyperparams["num_hidden_layers"]
+    if hyperparams["activation"] == "gelu":
+        activation = jax.nn.gelu
+    elif hyperparams["activation"] == "silu":
+        activation = jax.nn.silu
+    elif hyperparams["activation"] == "celu":
+        activation = jax.nn.celu
+    elif hyperparams["activation"] == "selu":
+        activation = jax.nn.selu
+
     model = MLP(
         key=key2,
         dim=dim,
         time_varying=True,
         w=hidden_layer_list,
         num_layers=len(hidden_layer_list) + 1,
-        activation_fn=configs["activation_fn"],  # GeLU worked well
+        activation_fn=activation,  # GeLU worked well
     )
     schedule = optax.warmup_cosine_decay_schedule(
         init_value=0.0,
-        peak_value=configs["peak_value"],
+        peak_value=hyperparams["peak_value"],
         warmup_steps=2_000,
         decay_steps=steps,
         end_value=1e-5,
@@ -397,10 +409,31 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     # lr = 1e-4
     # optimizer = optax.adamw(schedule)
     # optimizer = optax.adamw(lr)
-    opt = configs["optimizer"]
+    if hyperparams["optimizer"] == "adamw":
+        opt = optax.adamw
+    elif hyperparams["optimizer"] == "adam":
+        opt = optax.adam
+    elif hyperparams["optimizer"] == "adagrad":
+        opt = optax.adagrad
+    elif hyperparams["optimizer"] == "adamaxw":
+        opt = optax.adagrad
+
     optimizer = optax.chain(optax.clip_by_global_norm(1.0), opt(schedule))
-    interpolant = configs["interpolant"]
-    interpolant_der = configs["interpolant_der"]
+    # interpolant = configs["interpolant"]
+    # interpolant_der = configs["interpolant_der"]
+    if hyperparams["interpolant"] == "linear_interpolant":
+        interpolant = linear_interpolant
+    elif hyperparams["interpolant"] == "trig_interpolant":
+        interpolant = trig_interpolant
+    elif hyperparams["interpolant"] == "sigmoid_interpolant":
+        interpolant = sigmoid_interpolant
+
+    if hyperparams["interpolant_der"] == "linear_interpolant_der":
+        interpolant_der = linear_interpolant_der
+    elif hyperparams["interpolant_der"] == "trig_interpolant_der":
+        interpolant_der = trig_interpolant_der
+    elif hyperparams["interpolant_der"] == "sigmoid_interpolant_der":
+        interpolant_der = sigmoid_interpolant_der
     interpolant_args = {"t": None, "x1": None, "x0": None}
 
     trainer = NNTrainer(
