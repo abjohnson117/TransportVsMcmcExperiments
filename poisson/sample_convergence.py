@@ -49,6 +49,16 @@ import wandb
 
 # plt.style.use("ggplot")
 
+# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+jax.config.update("jax_default_device", jax.devices()[2])
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--run_id", type=int, default=0, help="Run index or ID for output folder")
+args = parser.parse_args()
+
+RANK = args.run_id
+
 
 class MLP(eqx.Module):
     layers: List[eqx.nn.Linear]  # main hidden layers
@@ -114,31 +124,15 @@ class MLP(eqx.Module):
             x = h + s  # projected residual
         return self.out(x)
 
-
-# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-jax.config.update("jax_default_device", jax.devices()[1])
-
-# RANK = int(os.environ.get("OMPI_COMM_WORLD_RANK", os.environ.get("PMI_RANK", 0)))
-RANK = 0
-SIZE = int(os.environ.get("OMPI_COMM_WORLD_SIZE", os.environ.get("PMI_SIZE", 1)))
-
 configs = {
     "dataset": "darcy_flow_si_hmala",
-    "hidden_layer": 623,
-    "interpolant": sigmoid_interpolant,
-    "interpolant_der": sigmoid_interpolant_der,
-    "activation_fn": jax.nn.gelu,
-    "batch_size": 379,
-    "num_hidden_layers": 10,
-    "optimizer": optax.adagrad,
-    "peak_value": 0.0064240033048,
 }
 
 run = wandb.init(
     # set the wandb project where this run will be logged
-    project="Poisson - SI v hMALA, no PCA",
+    project="Poisson - SI v hMALA - Average",
     config=configs,
+    name=f"run={RANK}_ode_convergence"
 )
 
 
@@ -501,22 +495,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     print(f"This is the calculated relative error: {rel_err_array[i]}")
     print(f"This is the MMD (no PCA): {mmd_array_no_pca[i]}")
     print(f"This is the calculated relative error (no PCA): {rel_error_no_pca[i]}")
-    print(
-        f"This is the sliced Wasserstein distance: {swd(u_samples_gen, hmala_pca, n_projections=100)}"
-    )
-    print(
-        f"This is the relative sliced Wasserstein error: {(swd(u_samples_gen, hmala_pca, n_projections=100)) ** 2 / (np.var(hmala_samps)) ** 2}"
-    )
-    print(f"This is the X mean embedding: {mean_emb(u_samples_gen)}")
-    print(f"This is the Y mean embedding: {mean_emb(hmala_pca)}")
-    print(f"This is the XY mean embedding: {xy_mean_emb(u_samples_gen, hmala_pca)}")
-    print(
-        f"These are the kernel values for gen samples: {ker_jit(u_samples_gen, u_samples_gen)}"
-    )
-    print(
-        f"These are the kernel values for hmala samples: {ker_jit(hmala_pca, hmala_pca)}"
-    )
-    np.save(os.path.join(output_dir, f"u_samps_{i}.npy"), u_samples_gen)
+    # np.save(os.path.join(output_dir, f"u_samps_{i}.npy"), u_samples_gen)
 
 print("Successfully trained all models and now saving results!")
 np.save(os.path.join(output_dir, "nn_sample_convergence.npy"), mmd_array)
