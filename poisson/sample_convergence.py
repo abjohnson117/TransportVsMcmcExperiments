@@ -4,6 +4,9 @@ import yaml
 from pathlib import Path
 from typing import Callable, List
 
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 import jax
 import jax.numpy as jnp
@@ -15,8 +18,6 @@ from typing import Callable
 import pickle
 import equinox as eqx
 from ot.sliced import sliced_wasserstein_distance as swd
-
-import os
 
 from triangular_transport.flows.flow_trainer import (
     NNTrainer,
@@ -49,9 +50,7 @@ import wandb
 
 # plt.style.use("ggplot")
 
-# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-jax.config.update("jax_default_device", jax.devices()[2])
+# jax.config.update("jax_default_device", jax.devices()[2])
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--run_id", type=int, default=0, help="Run index or ID for output folder")
