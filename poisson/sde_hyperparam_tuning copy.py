@@ -5,8 +5,10 @@ from pathlib import Path
 from typing import Callable, List
 
 import os
+
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+# os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".40"
 
 import jax
 import jax.numpy as jnp
@@ -14,33 +16,16 @@ import numpy as np
 from jax import grad, vmap, random
 import optax
 from tqdm.auto import tqdm
-from typing import Callable
 import pickle
 import equinox as eqx
 from ot.sliced import sliced_wasserstein_distance as swd
 
-from triangular_transport.flows.flow_trainer import (
-    NNTrainer,
-)
+from triangular_transport.flows.flow_trainer import NNSDE
 
-from triangular_transport.flows.interpolants import (
-    linear_interpolant,
-    linear_interpolant_der,
-    trig_interpolant,
-    trig_interpolant_der,
-    sigmoid_interpolant,
-    sigmoid_interpolant_der,
-)
-from triangular_transport.flows.loss_functions import vec_field_loss
+from triangular_transport.flows.loss_functions import vec_field_loss, denoiser_loss
 from triangular_transport.flows.methods.utils import UnitGaussianNormalizer
 
-# from triangular_transport.networks.flow_networks import MLP
 from triangular_transport.flows.dataloaders import gaussian_reference_sampler
-from triangular_transport.kernels.kernel_tools import (
-    get_gaussianRBF,
-    vectorize_kfunc,
-    get_sum_of_kernels,
-)
 
 import json
 import h5py
@@ -101,7 +86,7 @@ def get_pca_fns(us):
     def extra_cov():
         return V_res @ np.diag(S_res**2) @ V_res.T
 
-    return pca_encode, pca_decode, k, sample_extra, extra_cov
+    return pca_encode, pca_decode, k, sample_extra, extra_cov, S
 
 
 class MLP(eqx.Module):
@@ -169,7 +154,59 @@ class MLP(eqx.Module):
         return self.out(x)
 
 
-class SiOdeSmac:
+def gamma_fn(t):
+    return 0.1 * jnp.sqrt(2 * (t - t**2) + 1e-8)
+
+
+gamma_vmap = vmap(gamma_fn)
+
+gammadot = vmap(grad(gamma_fn))
+
+
+@vmap
+def linear_interpolant(t, x1, x0, z):
+    return t * x1 + (1 - t) * x0 + gamma_vmap(t) * z
+
+
+@vmap
+def linear_interpolant_der(t, x1, x0, z):
+    return x1 - x0 + gammadot(t) * z
+
+
+@vmap
+def trig_interpolant(t: jnp.array, x1: jnp.array, x0: jnp.arra, z):
+    return (
+        jnp.cos((jnp.pi / 2) * t) * x0
+        + jnp.sin((jnp.pi / 2) * t) * x1
+        + gamma_vmap(t) * z
+    )
+
+
+@vmap
+def trig_interpolant_der(t: jnp.array, x1: jnp.array, x0: jnp.array, z):
+    return (jnp.pi / 2) * (
+        -jnp.sin((jnp.pi / 2) * t) * x0 + jnp.cos((jnp.pi / 2) * t) * x1
+    ) + gammadot(t) * z
+
+
+@vmap
+def sigmoid_interpolant(t: jnp.array, x1: jnp.array, x0: jnp.array, z):
+    return (1 - sigmoid(t)) * x0 + sigmoid(t) * x1 + gamma_vmap(t) * z
+
+
+def sigmoid(t: float) -> float:
+    return jax.nn.sigmoid(10 * (t - 0.5))  # Changed this to 25
+
+
+@vmap
+def sigmoid_interpolant_der(t, x1, x0, z):
+    return sigmoid_dot(t) * (x1 - x0) + gamma_vmap(t) + z
+
+
+sigmoid_dot = vmap(grad(sigmoid))
+
+
+class SiSdeSmac:
     def __init__(
         self,
         train_dim: int,
@@ -178,6 +215,7 @@ class SiOdeSmac:
         x0_data: jax.Array,
         yu_dimension: tuple,
         interpolant_args: dict,
+        reference_sampler_args: dict,
     ):
         self.train_dim = train_dim
         self.steps = steps
@@ -185,6 +223,7 @@ class SiOdeSmac:
         self.x0_data = x0_data
         self.yu_dimension = yu_dimension
         self.interpolant_args = interpolant_args
+        self.reference_sampler_args = reference_sampler_args
 
     @property
     def configspace(self) -> ConfigurationSpace:
@@ -197,34 +236,61 @@ class SiOdeSmac:
         )
         interpolant_der = Categorical(
             "interpolant_der",
-            ["linear_interpolant_der", "trig_interpolant_der", "sigmoid_interpolant_der"],
+            [
+                "linear_interpolant_der",
+                "trig_interpolant_der",
+                "sigmoid_interpolant_der",
+            ],
             default="linear_interpolant_der",
         )
-        activation = Categorical(
-            "activation",
+        v_activation = Categorical(
+            "v_activation",
             ["gelu", "selu", "celu", "silu"],
             default="gelu",
         )
-        optimizer = Categorical(
-            "optimizer",
+        s_activation = Categorical(
+            "s_activation",
+            ["gelu", "selu", "celu", "silu"],
+            default="gelu",
+        )
+        v_optimizer = Categorical(
+            "v_optimizer",
             ["adamw", "adam", "adagrad", "adamaxw"],
             default="adamw",
         )
-        hidden_layer = Integer("hidden_layer", (100, 1000), default=512, log=True)
-        num_hidden_layers = Integer("num_hidden_layers", (2, 10), default=4, log=True)
+        s_optimizer = Categorical(
+            "s_optimizer",
+            ["adamw", "adam", "adagrad", "adamaxw"],
+            default="adamw",
+        )
         batch_size = Integer("batch_size", (100, 2000), default=128, log=True)
-        peak_value = Float("peak_value", (1e-4, 1e-2), default=3e-4, log=True)
+
+        v_hidden_layer = Integer("v_hidden_layer", (100, 1000), default=512, log=True)
+        v_num_hidden_layers = Integer(
+            "v_num_hidden_layers", (2, 10), default=4, log=True
+        )
+        v_peak_value = Float("v_peak_value", (1e-4, 1e-2), default=3e-4, log=True)
+        s_hidden_layer = Integer("s_hidden_layer", (100, 1000), default=512, log=True)
+        s_num_hidden_layers = Integer(
+            "s_num_hidden_layers", (2, 10), default=4, log=True
+        )
+        s_peak_value = Float("s_peak_value", (1e-4, 1e-2), default=3e-4, log=True)
 
         cs.add(
             [
                 interpolant,
                 interpolant_der,
-                activation,
-                hidden_layer,
-                num_hidden_layers,
+                v_activation,
+                s_activation,
+                v_hidden_layer,
+                s_hidden_layer,
+                v_num_hidden_layers,
+                s_num_hidden_layers,
                 batch_size,
-                optimizer,
-                peak_value,
+                v_optimizer,
+                s_optimizer,
+                v_peak_value,
+                s_peak_value,
             ]
         )
         return cs
@@ -238,7 +304,7 @@ class SiOdeSmac:
             interpolant = trig_interpolant
         elif config_dict["interpolant"] == "sigmoid_interpolant":
             interpolant = sigmoid_interpolant
-        
+
         if config_dict["interpolant_der"] == "linear_interpolant_der":
             interpolant_der = linear_interpolant_der
         elif config_dict["interpolant_der"] == "trig_interpolant_der":
@@ -246,23 +312,41 @@ class SiOdeSmac:
         elif config_dict["interpolant_der"] == "sigmoid_interpolant_der":
             interpolant_der = sigmoid_interpolant_der
 
-        if config_dict["activation"] == "gelu":
-            activation = jax.nn.gelu
-        elif config_dict["activation"] == "silu":
-            activation = jax.nn.silu
-        elif config_dict["activation"] == "celu":
-            activation = jax.nn.celu
-        elif config_dict["activation"] == "selu":
-            activation = jax.nn.selu
+        if config_dict["v_activation"] == "gelu":
+            v_activation = jax.nn.gelu
+        elif config_dict["v_activation"] == "silu":
+            v_activation = jax.nn.silu
+        elif config_dict["v_activation"] == "celu":
+            v_activation = jax.nn.celu
+        elif config_dict["v_activation"] == "selu":
+            v_activation = jax.nn.selu
 
-        if config_dict["optimizer"] == "adamw":
-            opt = optax.adamw
-        elif config_dict["optimizer"] == "adam":
-            opt = optax.adam
-        elif config_dict["optimizer"] == "adagrad":
-            opt = optax.adagrad
-        elif config_dict["optimizer"] == "adamaxw":
-            opt = optax.adagrad
+        if config_dict["s_activation"] == "gelu":
+            s_activation = jax.nn.gelu
+        elif config_dict["s_activation"] == "silu":
+            s_activation = jax.nn.silu
+        elif config_dict["s_activation"] == "celu":
+            s_activation = jax.nn.celu
+        elif config_dict["s_activation"] == "selu":
+            s_activation = jax.nn.selu
+
+        if config_dict["v_optimizer"] == "adamw":
+            v_opt = optax.adamw
+        elif config_dict["v_optimizer"] == "adam":
+            v_opt = optax.adam
+        elif config_dict["v_optimizer"] == "adagrad":
+            v_opt = optax.adagrad
+        elif config_dict["v_optimizer"] == "adamaxw":
+            v_opt = optax.adagrad
+
+        if config_dict["s_optimizer"] == "adamw":
+            s_opt = optax.adamw
+        elif config_dict["s_optimizer"] == "adam":
+            s_opt = optax.adam
+        elif config_dict["s_optimizer"] == "adagrad":
+            s_opt = optax.adagrad
+        elif config_dict["s_optimizer"] == "adamaxw":
+            s_opt = optax.adagrad
 
         key = random.PRNGKey(seed=seed)
         key1, key2 = random.split(key=key, num=2)
@@ -270,42 +354,65 @@ class SiOdeSmac:
         steps = self.steps
         yu_dimension = self.yu_dimension
         dim = yu_dimension[0] + yu_dimension[1]
-        hidden_layer_list = [config_dict["hidden_layer"]] * (
-            config_dict["num_hidden_layers"]
+        v_hidden_layer_list = [config_dict["v_hidden_layer"]] * (
+            config_dict["v_num_hidden_layers"]
         )
-        model = MLP(
+        s_hidden_layer_list = [config_dict["s_hidden_layer"]] * (
+            config_dict["s_num_hidden_layers"]
+        )
+        velocity = MLP(
             key=key2,
             dim=dim,
             time_varying=True,
-            w=hidden_layer_list,
-            num_layers=len(hidden_layer_list) + 1,
-            activation_fn=activation,
+            w=v_hidden_layer_list,
+            num_layers=len(v_hidden_layer_list) + 1,
+            activation_fn=v_activation,
         )
-        schedule = optax.warmup_cosine_decay_schedule(
+        score = MLP(
+            key=key2,
+            dim=dim,
+            time_varying=True,
+            w=s_hidden_layer_list,
+            num_layers=len(s_hidden_layer_list) + 1,
+            activation_fn=s_activation,
+        )
+        v_schedule = optax.warmup_cosine_decay_schedule(
             init_value=0.0,
-            peak_value=config_dict["peak_value"],
+            peak_value=config_dict["v_peak_value"],
+            warmup_steps=2_000,
+            decay_steps=steps,
+            end_value=1e-5,
+        )
+        s_schedule = optax.warmup_cosine_decay_schedule(
+            init_value=0.0,
+            peak_value=config_dict["s_peak_value"],
             warmup_steps=2_000,
             decay_steps=steps,
             end_value=1e-5,
         )
         # opt = config_dict["optimizer"]
-        optimizer = optax.chain(optax.clip_by_global_norm(1.0), opt(schedule))
+        v_optimizer = optax.chain(optax.clip_by_global_norm(1.0), v_opt(v_schedule))
+        s_optimizer = optax.chain(optax.clip_by_global_norm(1.0), s_opt(s_schedule))
         # interpolant = config_dict["interpolant"]
         # interpolant_der = config_dict["interpolant_der"]
 
-        trainer = NNTrainer(
+        trainer = NNSDE(
             target_density=None,
-            model=model,
-            optimizer=optimizer,
+            velocity=velocity,
+            score=score,
+            v_optimizer=v_optimizer,
+            s_optimizer=s_optimizer,
             interpolant=interpolant,
             interpolant_der=interpolant_der,
             reference_sampler=gaussian_reference_sampler,
-            loss=vec_field_loss,
+            v_loss=vec_field_loss,
+            s_loss=denoiser_loss,
             interpolant_args=self.interpolant_args,
+            reference_sampler_args=self.reference_sampler_args,
             yu_dimension=yu_dimension,
         )
         trainer.train(
-            train_data=self.train_data,
+            x1_data=self.train_data,
             train_dim=self.train_dim,
             batch_size=batch_size,
             steps=steps,
@@ -315,8 +422,12 @@ class SiOdeSmac:
         ytrue_flat_normalized = ys_normalizer.encode(ytrue_flat)
 
         cond_values = ytrue_flat_normalized
+        solver_args = {"saveat": "t1", "D_mask": D_mask}
         cond_samples = trainer.conditional_sample(
-            cond_values=cond_values, u0_cond=us_test_pca, nsamples=20000
+            cond_values=cond_values,
+            u0_cond=us_test_pca,
+            nsamples=20000,
+            solver_args=solver_args,
         )
         all_samples = cond_samples
 
@@ -346,7 +457,7 @@ class SiOdeSmac:
 configs = {"dataset": "darcy_flow_si_hmala"}
 
 sep = "\n" + "#" * 80 + "\n"
-output_root = "hyperparam_results"
+output_root = "hyperparam_results_sde"
 os.makedirs(output_root, exist_ok=True)
 
 with open("poisson.yaml") as fid:
@@ -392,7 +503,7 @@ np.random.shuffle(us_test)
 ys_normalizer = UnitGaussianNormalizer(ys)
 ys_normalized = ys_normalizer.encode()
 
-pca_encode, pca_decode, k, sample_extra, extra_cov = get_pca_fns(us_ref)
+pca_encode, pca_decode, k, sample_extra, extra_cov, S = get_pca_fns(us_ref)
 extra_samp = sample_extra(1).reshape(nx, ny)
 extra_pca_cov = extra_cov()
 extra_pca_var = np.diag(extra_pca_cov).reshape(nx, ny)
@@ -413,8 +524,10 @@ base_swd = swd(
     us_ref[random_idxs, :], hmala_samps, n_projections=n_projections, seed=SEED
 )
 print(f"This is the base swd: {base_swd}")
+D_mask = jnp.concatenate([jnp.zeros(ys_normalized.shape[1]), jnp.sqrt(S)])
 
-interpolant_args = {"t": None, "x1": None, "x0": None}
+interpolant_args = {"t": None, "x1": None, "x0": None, "z": None}
+reference_sampler_args = {"D_mask": D_mask}
 steps = 10000
 yu_dimension = (ys_normalized.shape[1], k.item())
 train_data = jnp.hstack([ys_normalized, us_pca])
@@ -429,23 +542,24 @@ rel_error_array = np.zeros(len(sample_no_list))
 for i, sample_no in enumerate(sample_no_list):
     run = wandb.init(
         # set the wandb project where this run will be logged
-        project="Poisson - SI hyperparam tuning",
+        project="Poisson - SI hyperparam tuning (SDE)",
         name=f"iter={i}_n={sample_no}",
         group="sweep",
         reinit=True,
-        config={"iter": i, "n":sample_no, **configs},
-        settings=wandb.Settings(start_method="thread")
+        config={"iter": i, "n": sample_no, **configs},
+        settings=wandb.Settings(start_method="thread"),
     )
-    train_data_iter = train_data[1: (sample_no + 1), :]
-    x0_data_iter = x0_data[1: (sample_no + 1), :]
+    train_data_iter = train_data[1 : (sample_no + 1), :]
+    x0_data_iter = x0_data[1 : (sample_no + 1), :]
 
-    regressor = SiOdeSmac(
+    regressor = SiSdeSmac(
         train_dim=train_dim,
         steps=steps,
         train_data=train_data_iter,
         x0_data=x0_data_iter,
         yu_dimension=yu_dimension,
         interpolant_args=interpolant_args,
+        reference_sampler_args=reference_sampler_args,
     )
 
     scenario = Scenario(
@@ -483,7 +597,6 @@ for i, sample_no in enumerate(sample_no_list):
     save_path = os.path.join(iter_folder, "best_hyperparams.pkl")
     with open(save_path, "wb") as f:
         pickle.dump(best_hyperparams, f)
-
 
     print(f"Best hyperparameters saved to {save_path}")
 

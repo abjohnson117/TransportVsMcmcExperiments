@@ -370,7 +370,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     #     batch_size = configs["batch_size"]
     batch_size = hyperparams["batch_size"]
     # steps = 50000
-    steps = 15000
+    steps = 10000
     print_every = 5000
     yu_dimension = (100, k.item())
     dim = yu_dimension[0] + yu_dimension[1]
