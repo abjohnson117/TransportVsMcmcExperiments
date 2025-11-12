@@ -8,7 +8,7 @@ import gc
 import os
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".40"
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".60"
 
 import jax
 import jax.numpy as jnp
@@ -262,14 +262,14 @@ class SiSdeSmac:
         )
         batch_size = Integer("batch_size", (100, 2000), default=128, log=True)
 
-        v_hidden_layer = Integer("v_hidden_layer", (100, 1000), default=512, log=True)
+        v_hidden_layer = Integer("v_hidden_layer", (100, 512), default=512, log=True)
         v_num_hidden_layers = Integer(
-            "v_num_hidden_layers", (2, 10), default=4, log=True
+            "v_num_hidden_layers", (2, 6), default=4, log=True
         )
         v_peak_value = Float("v_peak_value", (1e-4, 1e-2), default=3e-4, log=True)
-        s_hidden_layer = Integer("s_hidden_layer", (100, 1000), default=512, log=True)
+        s_hidden_layer = Integer("s_hidden_layer", (100, 512), default=512, log=True)
         s_num_hidden_layers = Integer(
-            "s_num_hidden_layers", (2, 10), default=4, log=True
+            "s_num_hidden_layers", (2, 6), default=4, log=True
         )
         s_peak_value = Float("s_peak_value", (1e-4, 1e-2), default=3e-4, log=True)
 
@@ -358,7 +358,7 @@ class SiSdeSmac:
             config_dict["s_num_hidden_layers"]
         )
         velocity = MLP(
-            key=key2,
+            key=key1,
             dim=dim,
             time_varying=True,
             w=v_hidden_layer_list,
@@ -568,6 +568,7 @@ for i, sample_no in enumerate(sample_no_list):
         regressor.configspace,
         n_trials=150,
         deterministic=True,
+        n_workers=1,
     )
 
     initial_design = HyperparameterOptimizationFacade.get_initial_design(
