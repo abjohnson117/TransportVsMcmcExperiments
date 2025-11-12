@@ -173,6 +173,7 @@ wandb
 poisson/convergence_results_sde
 poisson/convergence_results_sde_pca
 poisson/hyperparam_results
+poisson/hyperparam_results_sde
 broken_poisson_rootlock
 poisson/convergence_results
 p-poisson/test_dataset

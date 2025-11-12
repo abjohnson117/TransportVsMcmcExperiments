@@ -3,11 +3,11 @@ import matplotlib.pyplot as plt
 import yaml
 from pathlib import Path
 from typing import Callable, List
+import gc
 
 import os
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-# os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".40"
 
 import jax
@@ -20,7 +20,7 @@ import pickle
 import equinox as eqx
 from ot.sliced import sliced_wasserstein_distance as swd
 
-from triangular_transport.flows.flow_trainer import NNSDE
+from triangular_transport.flows.sde_flow_trainer import NNSDE
 
 from triangular_transport.flows.loss_functions import vec_field_loss, denoiser_loss
 from triangular_transport.flows.methods.utils import UnitGaussianNormalizer
@@ -42,9 +42,6 @@ from ConfigSpace import (
 )
 from ConfigSpace.conditions import InCondition
 from smac import HyperparameterOptimizationFacade, Scenario
-
-# os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-# jax.config.update("jax_default_device", jax.devices()[1])
 
 
 def read_data_h5(path="data.h5"):
@@ -174,7 +171,7 @@ def linear_interpolant_der(t, x1, x0, z):
 
 
 @vmap
-def trig_interpolant(t: jnp.array, x1: jnp.array, x0: jnp.arra, z):
+def trig_interpolant(t: jnp.array, x1: jnp.array, x0: jnp.array, z):
     return (
         jnp.cos((jnp.pi / 2) * t) * x0
         + jnp.sin((jnp.pi / 2) * t) * x1
@@ -337,7 +334,7 @@ class SiSdeSmac:
         elif config_dict["v_optimizer"] == "adagrad":
             v_opt = optax.adagrad
         elif config_dict["v_optimizer"] == "adamaxw":
-            v_opt = optax.adagrad
+            v_opt = optax.adamaxw
 
         if config_dict["s_optimizer"] == "adamw":
             s_opt = optax.adamw
@@ -346,7 +343,7 @@ class SiSdeSmac:
         elif config_dict["s_optimizer"] == "adagrad":
             s_opt = optax.adagrad
         elif config_dict["s_optimizer"] == "adamaxw":
-            s_opt = optax.adagrad
+            s_opt = optax.adamaxw
 
         key = random.PRNGKey(seed=seed)
         key1, key2 = random.split(key=key, num=2)
@@ -411,47 +408,50 @@ class SiSdeSmac:
             reference_sampler_args=self.reference_sampler_args,
             yu_dimension=yu_dimension,
         )
-        trainer.train(
-            x1_data=self.train_data,
-            train_dim=self.train_dim,
-            batch_size=batch_size,
-            steps=steps,
-            x0_data=self.x0_data,
-        )
-        ytrue_flat = yobs.copy()
-        ytrue_flat_normalized = ys_normalizer.encode(ytrue_flat)
-
-        cond_values = ytrue_flat_normalized
-        solver_args = {"saveat": "t1", "D_mask": D_mask}
-        cond_samples = trainer.conditional_sample(
-            cond_values=cond_values,
-            u0_cond=us_test_pca,
-            nsamples=20000,
-            solver_args=solver_args,
-        )
-        all_samples = cond_samples
-
-        u_samples_gen = all_samples[:, yu_dimension[0] :]
-        u_samples_gen = jnp.asarray(u_samples_gen)
-        u_samples = pca_decode(u_samples_gen)
-        # u_samples_pca = pca_encode_total(u_samples) # To make sure in exactly the correct PCA basis
-
-        u_samples = u_samples.reshape(nsamples, nx, ny)
-        u_samples = jnp.asarray(u_samples)
-        u_samples += extra_samp
-        print("Calculating SWD...")
-        loss = (
-            swd(
-                u_samples.reshape(nsamples, nx * ny),
-                jnp.asarray(hmala_samps),
-                n_projections=n_projections,
-                seed=SEED,
+        try:
+            trainer.train(
+                x1_data=self.train_data,
+                train_dim=self.train_dim,
+                batch_size=batch_size,
+                steps=steps,
+                x0_data=self.x0_data,
             )
-            / base_swd
-        )
-        wandb.log({"relative error (swd)": loss})
+            solver_args = {"saveat": "t1", "D_mask": D_mask}
+            cond_samples = trainer.conditional_sample(
+                cond_values=cond_values,
+                u0_cond=us_test_pca,
+                nsamples=20000,
+                solver_args=solver_args,
+                gamma=gamma_fn,
+            )
 
-        return loss
+            u_samples_gen = cond_samples[:, yu_dimension[0] :]
+            u_samples_gen = jnp.asarray(u_samples_gen)
+            u_samples = pca_decode(u_samples_gen)
+            # u_samples_pca = pca_encode_total(u_samples) # To make sure in exactly the correct PCA basis
+
+            u_samples = u_samples.reshape(nsamples, nx, ny)
+            u_samples = jnp.asarray(u_samples)
+            u_samples += extra_samp
+            print("Calculating SWD...")
+            loss = (
+                swd(
+                    u_samples.reshape(nsamples, nx * ny),
+                    jnp.asarray(hmala_samps),
+                    n_projections=n_projections,
+                    seed=SEED,
+                )
+                / base_swd
+            )
+            wandb.log({"relative error (swd)": loss})
+
+            return float(loss)
+        finally:
+            del trainer, velocity, score
+            del cond_samples, u_samples_gen, u_samples
+            del v_optimizer, s_optimizer
+            jax.clear_caches()
+            gc.collect()
 
 
 configs = {"dataset": "darcy_flow_si_hmala"}
@@ -502,6 +502,8 @@ np.random.shuffle(us_test)
 
 ys_normalizer = UnitGaussianNormalizer(ys)
 ys_normalized = ys_normalizer.encode()
+ytrue_flat_normalized = ys_normalizer.encode(yobs)
+cond_values = ytrue_flat_normalized
 
 pca_encode, pca_decode, k, sample_extra, extra_cov, S = get_pca_fns(us_ref)
 extra_samp = sample_extra(1).reshape(nx, ny)
