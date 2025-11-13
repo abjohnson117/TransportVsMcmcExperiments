@@ -341,7 +341,7 @@ print(
 # )
 print(f"This is the base swd: {base_swd}")
 
-D_mask = jnp.concatenate([jnp.zeros(ys_normalized.shape[1]), S])
+D_mask = jnp.concatenate([jnp.zeros(ys_normalized.shape[1]), jnp.sqrt(S)])
 
 sample_no_list = [2**i for i in range(1, 15)]
 sample_no_list.append(nsamples)
@@ -373,51 +373,91 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     print(
         f"This is the size of target and ref data: {target_data.shape} and {ref_data.shape}"
     )
+    with open(f"hyperparam_results/iteration_{i}/best_hyperparams.pkl", "rb") as f:
+        hyperparams = pickle.load(f)
 
     key = random.PRNGKey(seed=np.random.choice(1000))
     key1, key2 = random.split(key=key, num=2)
-    if sample_no < 128:
-        batch_size = sample_no
-    else:
-        batch_size = 128
     # steps = 50000
-    steps = 50000
+    steps = 10000
+    batch_size = hyperparams["batch_size"]
     print_every = 5000
     yu_dimension = (100, k.item())
     dim = yu_dimension[0] + yu_dimension[1]
-    hidden_layer_list = [configs["hidden_layer"]] * 4
+    v_hidden_layer_list = [hyperparams["v_hidden_layer"]] * hyperparams["v_num_hidden_layers"]
+    s_hidden_layer_list = [hyperparams["s_hidden_layer"]] * hyperparams["s_num_hidden_layers"]
+
+    if hyperparams["v_activation"] == "gelu":
+        v_activation = jax.nn.gelu
+    elif hyperparams["v_activation"] == "silu":
+        v_activation = jax.nn.silu
+    elif hyperparams["v_activation"] == "celu":
+        v_activation = jax.nn.celu
+    elif hyperparams["v_activation"] == "selu":
+        v_activation = jax.nn.selu
+
+    if hyperparams["s_activation"] == "gelu":
+        s_activation = jax.nn.gelu
+    elif hyperparams["s_activation"] == "silu":
+        s_activation = jax.nn.silu
+    elif hyperparams["s_activation"] == "celu":
+        s_activation = jax.nn.celu
+    elif hyperparams["s_activation"] == "selu":
+        s_activation = jax.nn.selu
+
+
     velocity = MLP(
         key=key2,
         dim=dim,
         time_varying=True,
-        w=hidden_layer_list,
-        num_layers=len(hidden_layer_list) + 1,
-        activation_fn=jax.nn.gelu,  # GeLU worked well
+        w=v_hidden_layer_list,
+        num_layers=len(v_hidden_layer_list) + 1,
+        activation_fn=v_activation,  # GeLU worked well
     )
 
     score = MLP(
         key=key2,
         dim=dim,
         time_varying=True,
-        w=hidden_layer_list,
-        num_layers=len(hidden_layer_list) + 1,
-        activation_fn=jax.nn.gelu,  # GeLU worked well
+        w=s_hidden_layer_list,
+        num_layers=len(s_hidden_layer_list) + 1,
+        activation_fn=s_activation,  # GeLU worked well
     )
-    schedule = optax.warmup_cosine_decay_schedule(
+    v_schedule = optax.warmup_cosine_decay_schedule(
         init_value=0.0,
-        peak_value=3e-4,
+        peak_value=hyperparams["v_peak_value"],
         warmup_steps=2_000,
         decay_steps=steps,
         end_value=1e-5,
     )
-    # lr = 1e-4
-    # optimizer = optax.adamw(schedule)
-    # # optimizer = optax.adamw(lr)
-    # optimizer = optax.chain(optax.clip_by_global_norm(1.0), optax.adamw(schedule))
-    v_optimizer = optax.chain(optax.clip_by_global_norm(1.0), optax.adamw(schedule))
-    s_optimizer = optax.chain(optax.clip_by_global_norm(1.0), optax.adamw(schedule))
-    interpolant = configs["interpolant"]
-    interpolant_der = configs["interpolant_der"]
+    s_schedule = optax.warmup_cosine_decay_schedule(
+        init_value=0.0,
+        peak_value=hyperparams["s_peak_value"],
+        warmup_steps=2_000,
+        decay_steps=steps,
+        end_value=1e-5,
+    )
+    if hyperparams["v_optimizer"] == "adamw":
+        v_opt = optax.adamw
+    elif hyperparams["v_optimizer"] == "adam":
+        v_opt = optax.adam
+    elif hyperparams["v_optimizer"] == "adagrad":
+        v_opt = optax.adagrad
+    elif hyperparams["v_optimizer"] == "adamaxw":
+        v_opt = optax.adamaxw
+
+    if hyperparams["s_optimizer"] == "adamw":
+        s_opt = optax.adamw
+    elif hyperparams["s_optimizer"] == "adam":
+        s_opt = optax.adam
+    elif hyperparams["s_optimizer"] == "adagrad":
+        s_opt = optax.adagrad
+    elif hyperparams["s_optimizer"] == "adamaxw":
+        s_opt = optax.adamaxw
+    v_optimizer = optax.chain(optax.clip_by_global_norm(1.0), v_opt(v_schedule))
+    s_optimizer = optax.chain(optax.clip_by_global_norm(1.0), s_opt(s_schedule))
+    interpolant = hyperparams["interpolant"]
+    interpolant_der = hyperparams["interpolant_der"]
     interpolant_args = {"t": None, "x1": None, "x0": None, "z": None}
 
     trainer = NNSDE(
@@ -445,10 +485,11 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     ytrue_flat_normalized = ys_normalizer.encode(ytrue_flat)
 
     cond_values = ytrue_flat_normalized
-    if sample_no <= 1000:
-        solver_args = {"saveat": "t1", "D_mask": D_mask, "eps":0.0001}
-    else:
-        solver_args = {"saveat": "t1"}
+    # if sample_no <= 1000:
+    #     solver_args = {"saveat": "t1", "D_mask": D_mask, "eps":0.0001}
+    # else:
+    #     solver_args = {"saveat": "t1"}
+    solver_args = {"saveat": "t1", "D_mask": D_mask}
     cond_samples = trainer.conditional_sample(
         cond_values=cond_values,
         u0_cond=us_test_pca,
