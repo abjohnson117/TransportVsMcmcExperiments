@@ -9,7 +9,7 @@ import hippylib2muq as hm
 import dolfin as dl
 import hippylib as hp
 
-RANK = int(os.environ.get("OMPI_COMM_WORLD_RANK", os.environ.get("PMI_RANK", 0))) + 30
+RANK = int(os.environ.get("OMPI_COMM_WORLD_RANK", os.environ.get("PMI_RANK", 0)))
 plt.style.use("ggplot")
 
 def cal_qoiTracer(pde, qoi, muq_samps, pde_solve):
@@ -130,12 +130,12 @@ no_dofs = 50
 qoi_list = [CoordinateQOI(i) for i in range(no_dofs)]
 
 # Loading samples
-output_root = "training_dataset"
+output_root = "mcmc_98"
 output_dir = os.path.join(output_root, f"chain_{RANK:02d}")
-hmala_samples = np.load(f"{output_dir}/hmala_samples_grid.npy")
+hmala_samples = np.load(f"{output_dir}/hmala_samples.npy")
 
 # Loading method lists to calculate
-with open(os.path.join(output_dir, "method-list-hmala-grid.pkl"), "rb") as f:
+with open(os.path.join(output_dir, "method-list-hmala.pkl"), "rb") as f:
     method_list = pkl.load(f)
 
 # Get QOI results for individual coordinates

@@ -42,11 +42,30 @@ import muq.Modeling as mm
 import muq.SamplingAlgorithms as ms
 import hippylib2muq as hm
 
-RANK = int(os.environ.get("OMPI_COMM_WORLD_RANK", os.environ.get("PMI_RANK", 0))) + 30
+RANK = int(os.environ.get("OMPI_COMM_WORLD_RANK", os.environ.get("PMI_RANK", 0))) + 25
 SIZE = int(os.environ.get("OMPI_COMM_WORLD_SIZE", os.environ.get("PMI_SIZE", 1)))
+print(f"This is RANK: {RANK}")
 
-print("this is the newest update")
+import argparse
 
+parser = argparse.ArgumentParser(description=f"Run MCMC chain: {RANK}")
+parser.add_argument(
+    "--data_path",
+    type=str,
+    required=False,
+    default=None,
+    help="Path to .npy data file (misfit)"
+)
+
+parser.add_argument(
+    "--output_root",
+    type=str,
+    required=False,
+    default=None,
+    help="Output root for generated MCMC samps"
+)
+
+args = parser.parse_args()
 def get_data(arg, vec, mesh):
     # sqrt_dim = int(np.sqrt(arg.dim()))
     f = dl.Function(arg, vec)
@@ -206,10 +225,13 @@ if __name__ == "__main__":
     with open("poisson.yaml") as fid:
         inargs = yaml.full_load(fid)
 
+    print("Got to main")
     sep = "\n" + "#" * 80 + "\n"
-    output_root = "training_dataset"
+    # output_root = "mcmc_median"
+    output_root = args.output_root
     # output_dir = os.path.join(output_root, f"chain_{RANK:02d}")
     output_dir = os.path.join(output_root, f"chain_{RANK:02d}")
+    print(f"This is output_dir: {output_dir}")
     os.makedirs(output_dir, exist_ok=True)
     #
     # Set up the mesh and finite element function spaces
@@ -252,7 +274,9 @@ if __name__ == "__main__":
     # delta = 9.0
     # delta = 1.0 # This was 9.0
     delta = 9.0
-    anis_diff = dl.Identity(2) #TODO: Try to get rid of anis_diff here and see if it makes any difference.
+    anis_diff = dl.Identity(
+        2
+    )  # TODO: Try to get rid of anis_diff here and see if it makes any difference.
 
     prior = hp.BiLaplacianPrior(
         Vh[hp.PARAMETER], gamma, delta, anis_diff, robin_bc=True
@@ -274,6 +298,9 @@ if __name__ == "__main__":
 
     if inargs["have_data"]:
         targets, data = data_file("r")
+        if inargs["data_from_npy"]:
+            print("Getting data from median or 98th percentile")
+            data = np.load(args.data_path)
         misfit = hp.PointwiseStateObservation(Vh[hp.STATE], targets)
         misfit.d.set_local(data)
 
@@ -525,7 +552,7 @@ if __name__ == "__main__":
         vertex_samples[i] = f.compute_vertex_values(mesh)
 
     np.save(
-        os.path.join(output_dir, "hmala_samples_grid.npy"),
+        os.path.join(output_dir, "hmala_samples.npy"),
         vertex_samples,
     )
 
@@ -533,5 +560,5 @@ if __name__ == "__main__":
     save_list["hMALA"]["Sampler"] = None
     save_list["hMALA"]["Samples"] = vertex_samples
 
-    with open(os.path.join(output_dir, "method-list-hmala-grid.pkl"), "wb") as f:
+    with open(os.path.join(output_dir, "method-list-hmala.pkl"), "wb") as f:
         pickle.dump(method_list, f)

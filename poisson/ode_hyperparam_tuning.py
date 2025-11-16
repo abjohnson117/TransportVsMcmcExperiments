@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import yaml
 from pathlib import Path
 from typing import Callable, List
+import gc
 
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
@@ -304,41 +305,44 @@ class SiOdeSmac:
             interpolant_args=self.interpolant_args,
             yu_dimension=yu_dimension,
         )
-        trainer.train(
-            train_data=self.train_data,
-            train_dim=self.train_dim,
-            batch_size=batch_size,
-            steps=steps,
-            x0_data=self.x0_data,
-        )
-        ytrue_flat = yobs.copy()
-        ytrue_flat_normalized = ys_normalizer.encode(ytrue_flat)
-
-        cond_values = ytrue_flat_normalized
-        cond_samples = trainer.conditional_sample(
-            cond_values=cond_values, u0_cond=us_test_pca, nsamples=20000
-        )
-        all_samples = cond_samples
-
-        u_samples_gen = all_samples[:, yu_dimension[0] :]
-        u_samples_gen = jnp.asarray(u_samples_gen)
-        u_samples = pca_decode(u_samples_gen)
-        # u_samples_pca = pca_encode_total(u_samples) # To make sure in exactly the correct PCA basis
-
-        u_samples = u_samples.reshape(nsamples, nx, ny)
-        u_samples = jnp.asarray(u_samples)
-        u_samples += extra_samp
-        print("Calculating SWD...")
-        loss = (
-            swd(
-                u_samples.reshape(nsamples, nx * ny),
-                jnp.asarray(hmala_samps),
-                n_projections=n_projections,
-                seed=SEED,
+        try:
+            trainer.train(
+                train_data=self.train_data,
+                train_dim=self.train_dim,
+                batch_size=batch_size,
+                steps=steps,
+                x0_data=self.x0_data,
             )
-            / base_swd
-        )
-        wandb.log({"relative error (swd)": loss})
+            
+            cond_samples = trainer.conditional_sample(
+                cond_values=cond_values, u0_cond=us_test_pca, nsamples=20000
+            )
+            print("Calculating SWD...")
+            swd_list = np.zeros(3)
+            for i, all_samples in enumerate(cond_samples):
+                u_samples_gen = all_samples[:, yu_dimension[0] :]
+                u_samples_gen = jnp.asarray(u_samples_gen)
+                u_samples = pca_decode(u_samples_gen)
+                # u_samples_pca = pca_encode_total(u_samples) # To make sure in exactly the correct PCA basis
+
+                u_samples = u_samples.reshape(nsamples, nx, ny)
+                u_samples = jnp.asarray(u_samples)
+                u_samples += extra_samp
+                swd_list[i] = swd(
+                        u_samples.reshape(nsamples, nx * ny),
+                        jnp.asarray(hmala_list[i]),
+                        n_projections=n_projections,
+                        seed=SEED,
+                    ) / base_swd_list[i]
+            swd_average = np.mean(swd_list)
+            loss = swd_average.item()
+            wandb.log({"relative error (swd)": loss})
+        finally:
+            del trainer, model
+            del cond_samples, u_samples_gen, u_samples
+            del optimizer
+            jax.clear_caches()
+            gc.collect()
 
         return loss
 
@@ -356,6 +360,8 @@ utrue = np.load("training_dataset/true_param_grid.npy")
 ytrue = np.load("training_dataset/true_state_grid.npy")
 map_est = np.load("training_dataset/map_param_grid.npy")
 targets, yobs = read_data_h5()
+yobs_med = np.load("data_50.npy")
+yobs_98 = np.load("data_98.npy")
 
 # Load h-MALA samples
 nsamples = inargs["MCMC"]["nsamples"] - inargs["MCMC"]["burnin"]
@@ -372,6 +378,27 @@ for i in tqdm(range(40)):
 hmala_samps = np.vstack(
     chains
 )  # This is a chain with 20,000 independently drawn samples
+
+med_root = "mcmc_median"
+chains = []
+for i in tqdm(range(20)):
+    hmala_dir = f"chain_{i:02d}"
+    hmala_path = os.path.join(med_root, hmala_dir, "hmala_samples.npy")
+    hmala_samps_chain = np.load(hmala_path).reshape(47000, flat_length)[7000:, :]
+    thinned_samps = hmala_samps_chain[::40, :]
+    chains.append(thinned_samps)
+hmala_med = np.vstack(chains) # 20,000 independent samples at median
+
+med_root = "mcmc_98"
+chains = []
+for i in tqdm(range(20)):
+    hmala_dir = f"chain_{i:02d}"
+    hmala_path = os.path.join(med_root, hmala_dir, "hmala_samples.npy")
+    hmala_samps_chain = np.load(hmala_path).reshape(47000, flat_length)[7000:, :]
+    thinned_samps = hmala_samps_chain[::40, :]
+    chains.append(thinned_samps)
+hmala_98 = np.vstack(chains) # 20,000 independent samples at median
+hmala_list = [hmala_samps, hmala_med, hmala_98]
 
 train_dim = 50000
 ys = (np.load("training_dataset/solutions_grid_delta.npy"))[:train_dim]
@@ -391,6 +418,11 @@ np.random.shuffle(us_test)
 
 ys_normalizer = UnitGaussianNormalizer(ys)
 ys_normalized = ys_normalizer.encode()
+yobs_normalized = ys_normalizer.encode(yobs)
+ymed_normalized = ys_normalizer.encode(yobs_med)
+y98_normalized = ys_normalizer.encode(yobs_98)
+
+cond_values = [yobs_normalized, ymed_normalized, y98_normalized]
 
 pca_encode, pca_decode, k, sample_extra, extra_cov = get_pca_fns(us_ref)
 extra_samp = sample_extra(1).reshape(nx, ny)
@@ -403,8 +435,12 @@ us_ref_pca = pca_encode(us_ref)
 us_ref_pca = jnp.asarray(us_ref_pca)
 us_test_pca = pca_encode(us_test)
 us_test_pca = jnp.asarray(us_test_pca)
-hmala_pca = pca_encode(hmala_samps)
-hmala_pca = jnp.asarray(hmala_pca)
+# hmala_pca = pca_encode(hmala_samps)
+# hmala_pca = jnp.asarray(hmala_pca)
+# hmala_med_pca = pca_encode(hmala_med)
+# hmala_med_pca = jnp.asarray(hmala_med_pca)
+# hmala_98_pca = pca_encode(hmala_98)
+# hmala_98_pca = jnp.asarray(hmala_98_pca)
 
 SEED = 42
 n_projections = 4024
@@ -412,7 +448,16 @@ random_idxs = np.random.choice(len(us_ref_pca), (20000,))
 base_swd = swd(
     us_ref[random_idxs, :], hmala_samps, n_projections=n_projections, seed=SEED
 )
+swd_med = swd(
+    us_ref[random_idxs, :], hmala_med, n_projections=n_projections, seed=SEED
+)
+swd_98 = swd(
+    us_ref[random_idxs, :], hmala_98, n_projections=n_projections, seed=SEED
+)
 print(f"This is the base swd: {base_swd}")
+print(f"This is the swd median: {swd_med}")
+print(f"This is the swd 98: {swd_98}")
+base_swd_list = [base_swd, swd_med, swd_98]
 
 interpolant_args = {"t": None, "x1": None, "x0": None}
 steps = 10000
@@ -429,7 +474,7 @@ rel_error_array = np.zeros(len(sample_no_list))
 for i, sample_no in enumerate(sample_no_list):
     run = wandb.init(
         # set the wandb project where this run will be logged
-        project="Poisson - SI hyperparam tuning",
+        project="Poisson - SI hyperparams - multiple conditioning values",
         name=f"iter={i}_n={sample_no}",
         group="sweep",
         reinit=True,

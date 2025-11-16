@@ -6,7 +6,8 @@ plot: False
 
 # if False, the observation data will be stored to "data.h5"
 # if True, it will read the observation data from "data.h5"
-have_data: False
+have_data: True
+data_from_npy: True
 
 MCMC:
     # The file name (without extension) to save samples generated
@@ -28,6 +29,6 @@ MCMC:
     # Number of independent MCMC chains to run
     nchains: 1
     # Number of samples in each chain
-    nsamples: 22000
-    burnin: 2000
+    nsamples: 50000
+    burnin: 3000
 

@@ -4,6 +4,10 @@ import yaml
 from pathlib import Path
 from typing import Callable, List
 
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".40"
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -14,8 +18,6 @@ from typing import Callable
 import pickle
 import equinox as eqx
 from ot.sliced import sliced_wasserstein_distance as swd
-
-import os
 
 from triangular_transport.flows.sde_flow_trainer import NNSDE
 
@@ -38,12 +40,15 @@ import wandb
 # plt.style.use("ggplot")
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-jax.config.update("jax_default_device", jax.devices()[1])
+# os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+# jax.config.update("jax_default_device", jax.devices()[1])
 
 # RANK = int(os.environ.get("OMPI_COMM_WORLD_RANK", os.environ.get("PMI_RANK", 0)))
-RANK = 0
-SIZE = int(os.environ.get("OMPI_COMM_WORLD_SIZE", os.environ.get("PMI_SIZE", 1)))
+parser = argparse.ArgumentParser()
+parser.add_argument("--run_id", type=int, default=0, help="Run index or ID for output folder")
+args = parser.parse_args()
+
+RANK = args.run_id
 
 class MLP(eqx.Module):
     layers: List[eqx.nn.Linear]         # main hidden layers
@@ -126,6 +131,39 @@ def linear_interpolant_der(t, x1, x0, z):
     return x1 - x0 + gammadot(t) * z
 
 
+@vmap
+def trig_interpolant(t: jnp.array, x1: jnp.array, x0: jnp.array, z):
+    return (
+        jnp.cos((jnp.pi / 2) * t) * x0
+        + jnp.sin((jnp.pi / 2) * t) * x1
+        + gamma_vmap(t) * z
+    )
+
+
+@vmap
+def trig_interpolant_der(t: jnp.array, x1: jnp.array, x0: jnp.array, z):
+    return (jnp.pi / 2) * (
+        -jnp.sin((jnp.pi / 2) * t) * x0 + jnp.cos((jnp.pi / 2) * t) * x1
+    ) + gammadot(t) * z
+
+
+@vmap
+def sigmoid_interpolant(t: jnp.array, x1: jnp.array, x0: jnp.array, z):
+    return (1 - sigmoid(t)) * x0 + sigmoid(t) * x1 + gamma_vmap(t) * z
+
+
+def sigmoid(t: float) -> float:
+    return jax.nn.sigmoid(10 * (t - 0.5))  # Changed this to 25
+
+
+@vmap
+def sigmoid_interpolant_der(t, x1, x0, z):
+    return sigmoid_dot(t) * (x1 - x0) + gamma_vmap(t) + z
+
+
+sigmoid_dot = vmap(grad(sigmoid))
+
+
 configs = {
     "dataset": "darcy_flow_si_hmala",
     "hidden_layer": 512,
@@ -136,8 +174,9 @@ configs = {
 
 run = wandb.init(
     # set the wandb project where this run will be logged
-    project="Poisson - SI v hMALA, no PCA - SDE",
+    project="Poisson - SI v hMALA - SDE Average",
     config=configs,
+    name=f"run={RANK}_sde_convergence",
 )
 
 def read_data_h5(path="data.h5"):
@@ -373,7 +412,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     print(
         f"This is the size of target and ref data: {target_data.shape} and {ref_data.shape}"
     )
-    with open(f"hyperparam_results/iteration_{i}/best_hyperparams.pkl", "rb") as f:
+    with open(f"hyperparam_results_sde/iteration_{i}/best_hyperparams.pkl", "rb") as f:
         hyperparams = pickle.load(f)
 
     key = random.PRNGKey(seed=np.random.choice(1000))
@@ -456,8 +495,19 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         s_opt = optax.adamaxw
     v_optimizer = optax.chain(optax.clip_by_global_norm(1.0), v_opt(v_schedule))
     s_optimizer = optax.chain(optax.clip_by_global_norm(1.0), s_opt(s_schedule))
-    interpolant = hyperparams["interpolant"]
-    interpolant_der = hyperparams["interpolant_der"]
+    if hyperparams["interpolant"] == "linear_interpolant":
+        interpolant = linear_interpolant
+    elif hyperparams["interpolant"] == "trig_interpolant":
+        interpolant = trig_interpolant
+    elif hyperparams["interpolant"] == "sigmoid_interpolant":
+        interpolant = sigmoid_interpolant
+
+    if hyperparams["interpolant_der"] == "linear_interpolant_der":
+        interpolant_der = linear_interpolant_der
+    elif hyperparams["interpolant_der"] == "trig_interpolant_der":
+        interpolant_der = trig_interpolant_der
+    elif hyperparams["interpolant_der"] == "sigmoid_interpolant_der":
+        interpolant_der = sigmoid_interpolant_der
     interpolant_args = {"t": None, "x1": None, "x0": None, "z": None}
 
     trainer = NNSDE(
@@ -564,7 +614,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     print(
         f"These are the kernel values for hmala samples: {ker_jit(hmala_pca, hmala_pca)}"
     )
-    np.save(os.path.join(output_dir, f"u_samps_{i}.npy"), u_samples_gen)
+    # np.save(os.path.join(output_dir, f"u_samps_{i}.npy"), u_samples_gen)
 
 print("Successfully trained all models and now saving results!")
 np.save(os.path.join(output_dir, "nn_sample_convergence.npy"), mmd_array)
