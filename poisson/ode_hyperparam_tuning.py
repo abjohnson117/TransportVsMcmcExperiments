@@ -364,7 +364,8 @@ yobs_med = np.load("data_50.npy")
 yobs_98 = np.load("data_98.npy")
 
 # Load h-MALA samples
-nsamples = inargs["MCMC"]["nsamples"] - inargs["MCMC"]["burnin"]
+# nsamples = inargs["MCMC"]["nsamples"] - inargs["MCMC"]["burnin"]
+nsamples = 20000
 nx = ny = 33
 flat_length = nx * ny
 hmala_root = "training_dataset"
@@ -388,6 +389,7 @@ for i in tqdm(range(20)):
     thinned_samps = hmala_samps_chain[::40, :]
     chains.append(thinned_samps)
 hmala_med = np.vstack(chains) # 20,000 independent samples at median
+print(f"This is the shape of hmala_med: {hmala_med.shape}")
 
 med_root = "mcmc_98"
 chains = []
@@ -398,6 +400,7 @@ for i in tqdm(range(20)):
     thinned_samps = hmala_samps_chain[::40, :]
     chains.append(thinned_samps)
 hmala_98 = np.vstack(chains) # 20,000 independent samples at median
+print(f"This is the shape of hmala_98: {hmala_98.shape}")
 hmala_list = [hmala_samps, hmala_med, hmala_98]
 
 train_dim = 50000
@@ -464,13 +467,15 @@ steps = 10000
 yu_dimension = (ys_normalized.shape[1], k.item())
 train_data = jnp.hstack([ys_normalized, us_pca])
 x0_data = jnp.hstack([ys_normalized, us_ref_pca])
-sample_no_list = [2**i for i in range(1, 15)]
-sample_no_list.append(nsamples)
-sample_no_list.append(30000)
-sample_no_list.append(40000)
-sample_no_list.append(train_dim)
+# sample_no_list = [2**i for i in range(1, 15)]
+# sample_no_list.append(nsamples)
+# sample_no_list.append(30000)
+# sample_no_list.append(40000)
+# sample_no_list.append(train_dim)
+sample_no_list = [40000, 50000]
 rel_error_array = np.zeros(len(sample_no_list))
 
+print(f"This is the sample_no_list: {sample_no_list}")
 for i, sample_no in enumerate(sample_no_list):
     run = wandb.init(
         # set the wandb project where this run will be logged

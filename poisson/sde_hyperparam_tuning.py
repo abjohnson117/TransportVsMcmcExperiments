@@ -418,34 +418,30 @@ class SiSdeSmac:
             )
             solver_args = {"saveat": "t1", "D_mask": D_mask}
             cond_samples = trainer.conditional_sample(
-                cond_values=cond_values,
-                u0_cond=us_test_pca,
-                nsamples=20000,
-                solver_args=solver_args,
-                gamma=gamma_fn,
+                cond_values=cond_values, u0_cond=us_test_pca, nsamples=20000, solver_args=solver_args, gamma=gamma_fn
             )
-
-            u_samples_gen = cond_samples[:, yu_dimension[0] :]
-            u_samples_gen = jnp.asarray(u_samples_gen)
-            u_samples = pca_decode(u_samples_gen)
-            # u_samples_pca = pca_encode_total(u_samples) # To make sure in exactly the correct PCA basis
-
-            u_samples = u_samples.reshape(nsamples, nx, ny)
-            u_samples = jnp.asarray(u_samples)
-            u_samples += extra_samp
             print("Calculating SWD...")
-            loss = (
-                swd(
-                    u_samples.reshape(nsamples, nx * ny),
-                    jnp.asarray(hmala_samps),
-                    n_projections=n_projections,
-                    seed=SEED,
-                )
-                / base_swd
-            )
+            swd_list = np.zeros(3)
+            for i, all_samples in enumerate(cond_samples):
+                u_samples_gen = all_samples[:, yu_dimension[0] :]
+                u_samples_gen = jnp.asarray(u_samples_gen)
+                u_samples = pca_decode(u_samples_gen)
+                # u_samples_pca = pca_encode_total(u_samples) # To make sure in exactly the correct PCA basis
+
+                u_samples = u_samples.reshape(nsamples, nx, ny)
+                u_samples = jnp.asarray(u_samples)
+                u_samples += extra_samp
+                swd_list[i] = swd(
+                        u_samples.reshape(nsamples, nx * ny),
+                        jnp.asarray(hmala_list[i]),
+                        n_projections=n_projections,
+                        seed=SEED,
+                    ) / base_swd_list[i]
+            swd_average = np.mean(swd_list)
+            loss = swd_average.item()
             wandb.log({"relative error (swd)": loss})
 
-            return float(loss)
+            return loss
         finally:
             del trainer, velocity, score
             del cond_samples, u_samples_gen, u_samples
@@ -457,7 +453,7 @@ class SiSdeSmac:
 configs = {"dataset": "darcy_flow_si_hmala"}
 
 sep = "\n" + "#" * 80 + "\n"
-output_root = "hyperparam_results_sde"
+output_root = "hyperparam_results_sde_mult"
 os.makedirs(output_root, exist_ok=True)
 
 with open("poisson.yaml") as fid:
@@ -467,6 +463,8 @@ utrue = np.load("training_dataset/true_param_grid.npy")
 ytrue = np.load("training_dataset/true_state_grid.npy")
 map_est = np.load("training_dataset/map_param_grid.npy")
 targets, yobs = read_data_h5()
+yobs_med = np.load("data_50.npy")
+yobs_98 = np.load("data_98.npy")
 
 # Load h-MALA samples
 nsamples = inargs["MCMC"]["nsamples"] - inargs["MCMC"]["burnin"]
@@ -483,6 +481,29 @@ for i in tqdm(range(40)):
 hmala_samps = np.vstack(
     chains
 )  # This is a chain with 20,000 independently drawn samples
+
+med_root = "mcmc_median"
+chains = []
+for i in tqdm(range(20)):
+    hmala_dir = f"chain_{i:02d}"
+    hmala_path = os.path.join(med_root, hmala_dir, "hmala_samples.npy")
+    hmala_samps_chain = np.load(hmala_path).reshape(47000, flat_length)[7000:, :]
+    thinned_samps = hmala_samps_chain[::40, :]
+    chains.append(thinned_samps)
+hmala_med = np.vstack(chains) # 20,000 independent samples at median
+print(f"This is the shape of hmala_med: {hmala_med.shape}")
+
+med_root = "mcmc_98"
+chains = []
+for i in tqdm(range(20)):
+    hmala_dir = f"chain_{i:02d}"
+    hmala_path = os.path.join(med_root, hmala_dir, "hmala_samples.npy")
+    hmala_samps_chain = np.load(hmala_path).reshape(47000, flat_length)[7000:, :]
+    thinned_samps = hmala_samps_chain[::40, :]
+    chains.append(thinned_samps)
+hmala_98 = np.vstack(chains) # 20,000 independent samples at median
+print(f"This is the shape of hmala_98: {hmala_98.shape}")
+hmala_list = [hmala_samps, hmala_med, hmala_98]
 
 train_dim = 50000
 ys = (np.load("training_dataset/solutions_grid_delta.npy"))[:train_dim]
@@ -502,8 +523,10 @@ np.random.shuffle(us_test)
 
 ys_normalizer = UnitGaussianNormalizer(ys)
 ys_normalized = ys_normalizer.encode()
-ytrue_flat_normalized = ys_normalizer.encode(yobs)
-cond_values = ytrue_flat_normalized
+yobs_normalized = ys_normalizer.encode(yobs)
+ymed_normalized = ys_normalizer.encode(yobs_med)
+y98_normalized = ys_normalizer.encode(yobs_98)
+cond_values = [yobs_normalized, ymed_normalized, y98_normalized]
 
 pca_encode, pca_decode, k, sample_extra, extra_cov, S = get_pca_fns(us_ref)
 extra_samp = sample_extra(1).reshape(nx, ny)
@@ -516,8 +539,6 @@ us_ref_pca = pca_encode(us_ref)
 us_ref_pca = jnp.asarray(us_ref_pca)
 us_test_pca = pca_encode(us_test)
 us_test_pca = jnp.asarray(us_test_pca)
-hmala_pca = pca_encode(hmala_samps)
-hmala_pca = jnp.asarray(hmala_pca)
 
 SEED = 42
 n_projections = 4024
@@ -525,7 +546,14 @@ random_idxs = np.random.choice(len(us_ref_pca), (20000,))
 base_swd = swd(
     us_ref[random_idxs, :], hmala_samps, n_projections=n_projections, seed=SEED
 )
+swd_med = swd(
+    us_ref[random_idxs, :], hmala_med, n_projections=n_projections, seed=SEED
+)
+swd_98 = swd(
+    us_ref[random_idxs, :], hmala_98, n_projections=n_projections, seed=SEED
+)
 print(f"This is the base swd: {base_swd}")
+base_swd_list = [base_swd, swd_med, swd_98]
 D_mask = jnp.concatenate([jnp.zeros(ys_normalized.shape[1]), jnp.sqrt(S)])
 
 interpolant_args = {"t": None, "x1": None, "x0": None, "z": None}
@@ -544,7 +572,7 @@ rel_error_array = np.zeros(len(sample_no_list))
 for i, sample_no in enumerate(sample_no_list):
     run = wandb.init(
         # set the wandb project where this run will be logged
-        project="Poisson - SI hyperparam tuning (SDE)",
+        project="Poisson - SI hyperparams - SDE multiple conditioning vals",
         name=f"iter={i}_n={sample_no}",
         group="sweep",
         reinit=True,
