@@ -173,6 +173,7 @@ poisson/nohup.out
 poisson/mcmc_median
 poisson/mcmc_98
 poisson/.local
+poisson/hyperparam_results_sde_mult
 wandb
 poisson/convergence_results_sde
 poisson/convergence_results_sde_pca

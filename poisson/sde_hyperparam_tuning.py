@@ -467,7 +467,8 @@ yobs_med = np.load("data_50.npy")
 yobs_98 = np.load("data_98.npy")
 
 # Load h-MALA samples
-nsamples = inargs["MCMC"]["nsamples"] - inargs["MCMC"]["burnin"]
+# nsamples = inargs["MCMC"]["nsamples"] - inargs["MCMC"]["burnin"]
+nsamples = 20000
 nx = ny = 33
 flat_length = nx * ny
 hmala_root = "training_dataset"

@@ -54,6 +54,20 @@ import wandb
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--run_id", type=int, default=0, help="Run index or ID for output folder")
+parser.add_argument(
+    "--data_path",
+    type=str,
+    required=False,
+    default=None,
+    help="Path to .npy data file (misfit)"
+)
+parser.add_argument(
+    "--hmala_path",
+    type=str,
+    required=False,
+    default=None,
+    help="Path to .npy mcmc samps"
+)
 args = parser.parse_args()
 
 RANK = args.run_id
@@ -205,7 +219,7 @@ def gamma_from_sigma_jax(sigma):
 
 
 sep = "\n" + "#" * 80 + "\n"
-output_root = "convergence_results"
+output_root = "convergence_results_med"
 # output_dir = os.path.join(output_root, f"chain_{RANK:02d}")
 # output_dir = os.path.join(output_root, f"chain_{RANK:02d}")
 # output_dir = os.path.join(output_root, )
@@ -219,16 +233,31 @@ utrue = np.load("training_dataset/true_param_grid.npy")
 ytrue = np.load("training_dataset/true_state_grid.npy")
 map_est = np.load("training_dataset/map_param_grid.npy")
 targets, yobs = read_data_h5()
+if args.data_path == "data_50.npy":
+    yobs = np.load(args.data_path)
+elif args.data_path == "data_98.npy":
+    yobs = np.load(args.data_path)
 
 # Load h-MALA samples
 nsamples = inargs["MCMC"]["nsamples"] - inargs["MCMC"]["burnin"]
 nx = ny = 33
 flat_length = nx * ny
-hmala_root = "training_dataset"
+if args.hmala_path == "mcmc_median":
+    hmala_root = args.hmala_path
+    chain_iters = 20
+    hmala_tail = "hmala_samples.npy"
+elif args.hmala_path == "mcmc_98":
+    hmala_root = args.hmala_path
+    chain_iters = 20
+    hmala_tail = "hmala_samples.npy"
+else:
+    hmala_root = "training_dataset"
+    chain_iters = 40
+    hmala_tail = "hmala_samples_grid.npy"
 chains = []
-for i in tqdm(range(40)):
+for i in tqdm(range(chain_iters)):
     hmala_dir = f"chain_{i:02d}"
-    hmala_path = os.path.join(hmala_root, hmala_dir, "hmala_samples_grid.npy")
+    hmala_path = os.path.join(hmala_root, hmala_dir, hmala_tail)
     hmala_samps_chain = np.load(hmala_path).reshape(nsamples, flat_length)
     thinned_samps = hmala_samps_chain[::40, :]
     chains.append(thinned_samps)
