@@ -143,7 +143,7 @@ configs = {
 
 run = wandb.init(
     # set the wandb project where this run will be logged
-    project="Poisson - SI v hMALA - Average",
+    project="Poisson - SI v hMALA - 98 obs multiple runs",
     config=configs,
     name=f"run={RANK}_ode_convergence"
 )
@@ -219,7 +219,7 @@ def gamma_from_sigma_jax(sigma):
 
 
 sep = "\n" + "#" * 80 + "\n"
-output_root = "convergence_results_med"
+output_root = "convergence_results_98"
 # output_dir = os.path.join(output_root, f"chain_{RANK:02d}")
 # output_dir = os.path.join(output_root, f"chain_{RANK:02d}")
 # output_dir = os.path.join(output_root, )
@@ -239,26 +239,30 @@ elif args.data_path == "data_98.npy":
     yobs = np.load(args.data_path)
 
 # Load h-MALA samples
-nsamples = inargs["MCMC"]["nsamples"] - inargs["MCMC"]["burnin"]
+# nsamples = inargs["MCMC"]["nsamples"] - inargs["MCMC"]["burnin"]
+nsamples = 20000
 nx = ny = 33
 flat_length = nx * ny
-if args.hmala_path == "mcmc_median":
+if args.hmala_path == "mcmc_median/":
     hmala_root = args.hmala_path
     chain_iters = 20
     hmala_tail = "hmala_samples.npy"
-elif args.hmala_path == "mcmc_98":
+    reshape_no = 47000
+elif args.hmala_path == "mcmc_98/":
     hmala_root = args.hmala_path
     chain_iters = 20
     hmala_tail = "hmala_samples.npy"
+    reshape_no = 47000
 else:
     hmala_root = "training_dataset"
     chain_iters = 40
     hmala_tail = "hmala_samples_grid.npy"
+    reshape_no = 20000
 chains = []
 for i in tqdm(range(chain_iters)):
     hmala_dir = f"chain_{i:02d}"
     hmala_path = os.path.join(hmala_root, hmala_dir, hmala_tail)
-    hmala_samps_chain = np.load(hmala_path).reshape(nsamples, flat_length)
+    hmala_samps_chain = np.load(hmala_path).reshape(reshape_no, flat_length)
     thinned_samps = hmala_samps_chain[::40, :]
     chains.append(thinned_samps)
 hmala_samps = np.vstack(
