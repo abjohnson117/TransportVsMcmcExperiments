@@ -179,8 +179,12 @@ poisson/convergence_results_sde
 poisson/convergence_results_sde_pca
 poisson/hyperparam_results
 poisson/hyperparam_results_sde
+poisson/convergence_results_85
+poisson/convergence_results_98
+poisson/convergence_results_sde_med
 broken_poisson_rootlock
 poisson/convergence_results
+poisson/convergence_results_med
 p-poisson/test_dataset
 p-poisson/training_dataset
 p-poisson/*.log
