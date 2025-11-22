@@ -143,7 +143,7 @@ configs = {
 
 run = wandb.init(
     # set the wandb project where this run will be logged
-    project="Poisson - SI v hMALA - 98 obs multiple runs",
+    project="Poisson - SI v hMALA - on PCA space",
     config=configs,
     name=f"run={RANK}_ode_convergence"
 )
@@ -358,8 +358,11 @@ print(
 seed = 42
 n_projections = 4024
 random_idxs = np.random.choice(len(us_ref_pca), (20000,))
+# base_swd = swd(
+#     us_ref[random_idxs, :], hmala_samps, n_projections=n_projections, seed=seed
+# )
 base_swd = swd(
-    us_ref[random_idxs, :], hmala_samps, n_projections=n_projections, seed=seed
+    us_ref_pca[random_idxs, :], hmala_pca, n_projections=n_projections, seed=seed
 )
 print(f"This is the base swd: {base_swd}")
 
@@ -505,24 +508,25 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
 
     print("Calculating MMD...")
     mmd_array[i] = MMD(u_samples_gen, hmala_pca)
-    # rel_err_array[i] = (
-    #     swd(u_samples_gen, hmala_pca, n_projections=n_projections, seed=seed) / base_swd
-    # )
     rel_err_array[i] = (
-        swd(
-            u_samples.reshape(nsamples, nx * ny),
-            jnp.asarray(hmala_samps),
-            n_projections=n_projections,
-            seed=seed,
-        )
-        / base_swd
+        swd(u_samples_gen, hmala_pca, n_projections=n_projections, seed=seed) / base_swd
     )
+    # rel_err_array[i] = (
+    #     swd(
+    #         u_samples.reshape(nsamples, nx * ny),
+    #         jnp.asarray(hmala_samps),
+    #         n_projections=n_projections,
+    #         seed=seed,
+    #     )
+    #     / base_swd
+    # )
     wandb.log({"relative error (swd)": rel_err_array[i]}, step=sample_no)
     # ref_indices = np.random.choice(20000)
     # rel_err_array[i] = (MMD(u_samples_gen, us_ref_pca[ref_indices, :]) ** 2) / (MMD(hmala_samps, us_ref_pca[ref_indices, :]) ** 2)
     mmd_array_no_pca[i] = MMD(u_samples.reshape(nsamples, nx * ny), hmala_samps)
     rel_error_no_pca[i] = get_kme(u_samples.reshape(nsamples, nx * ny), hmala_samps)
-    wandb.log({"relative error (mmd)": rel_error_no_pca[i]}, step=sample_no)
+    # wandb.log({"relative error (mmd)": rel_error_no_pca[i]}, step=sample_no)
+    wandb.log({"relative error (mmd)": mmd_array[i]}, step=sample_no)
     print(f"This is the MMD: {mmd_array[i]}")
     print(f"This is the calculated relative error: {rel_err_array[i]}")
     print(f"This is the MMD (no PCA): {mmd_array_no_pca[i]}")

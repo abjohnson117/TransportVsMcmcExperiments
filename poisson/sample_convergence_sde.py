@@ -188,7 +188,7 @@ configs = {
 
 run = wandb.init(
     # set the wandb project where this run will be logged
-    project="Poisson - SI v hMALA - SDE Median",
+    project="Poisson - SI v hMALA - SDE 98",
     config=configs,
     name=f"run={RANK}_sde_convergence",
 )
