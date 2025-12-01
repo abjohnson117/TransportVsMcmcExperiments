@@ -219,7 +219,7 @@ def gamma_from_sigma_jax(sigma):
 
 
 sep = "\n" + "#" * 80 + "\n"
-output_root = "convergence_results_98"
+output_root = "convergence_results_pca"
 # output_dir = os.path.join(output_root, f"chain_{RANK:02d}")
 # output_dir = os.path.join(output_root, f"chain_{RANK:02d}")
 # output_dir = os.path.join(output_root, )
@@ -495,7 +495,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     u_samples_gen = all_samples[:, yu_dimension[0] :]
     u_samples_gen = jnp.asarray(u_samples_gen)
     u_samples = pca_decode(u_samples_gen)
-    # u_samples_pca = pca_encode_total(u_samples) # To make sure in exactly the correct PCA basis
+    u_samples_pca = pca_encode(u_samples) # To make sure in exactly the correct PCA basis
 
     u_samples = u_samples.reshape(nsamples, nx, ny)
     u_samples = jnp.asarray(u_samples)

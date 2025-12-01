@@ -183,6 +183,7 @@ poisson/convergence_results_85
 poisson/convergence_results_98
 poisson/convergence_results_sde_med
 poisson/convergence_results_sde_98
+poisson/convergence_results_pca
 broken_poisson_rootlock
 poisson/convergence_results
 poisson/convergence_results_med
