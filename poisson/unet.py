@@ -219,7 +219,7 @@ class ResnetBlock(eqx.Module):
             t = layer(t)
         for layer in self.mlp_layers_y:
             y = layer(y)
-        h = h + t[..., None, None] + y[..., None, None] # what does the indexing of t do here?
+        h = h + t[..., None, None] + y[..., None, None]
         # I want to do something similar for y here.
         for layer in self.block2_layers:
             # Precisely 1 dropout layer in block2_layers which requires a key.
@@ -238,8 +238,9 @@ class ResnetBlock(eqx.Module):
 
 
 class UNet(eqx.Module):
-    t1: float
+    data_shape: Tuple[int, int, int]
     time_pos_emb: SinusoidalPosEmb
+    y_dim: int
     mlp: eqx.nn.MLP
     first_conv: eqx.nn.Conv2d
     down_res_blocks: List[List[ResnetBlock]]
@@ -256,11 +257,10 @@ class UNet(eqx.Module):
         hidden_size: int,
         yu_dimension: Tuple[int, int],
         heads: int,
-        dim_head: int,
+        dim_head: int, #dim_head has to do with the self-attention.
         dropout_rate: float,
         num_res_blocks: int,
         attn_resolutions: List[int],
-        t1: float,
         langevin: bool,
         *,
         key
@@ -269,8 +269,10 @@ class UNet(eqx.Module):
         keys = jax.random.split(key, 8)
         del key
 
-        data_channels, in_height, in_width = data_shape
+        data_channels, in_height, in_width = data_shape # Have to make sure that the u data is unsqueezed at axis 0.
+        self.data_shape = data_shape
         y_dim = yu_dimension[0]
+        self.y_dim = y_dim
 
         if langevin:
             in_channels = 2 * data_channels
@@ -280,7 +282,6 @@ class UNet(eqx.Module):
         dims = [hidden_size] + [hidden_size * m for m in dim_mults]
         in_out = list(exact_zip(dims[:-1], dims[1:]))
 
-        self.t1 = t1
         self.time_pos_emb = SinusoidalPosEmb(hidden_size)
         self.mlp_t = eqx.nn.MLP(
             hidden_size,
@@ -292,7 +293,7 @@ class UNet(eqx.Module):
         )
         self.mlp_y = eqx.nn.MLP(
             y_dim,
-            hidden_size,
+            hidden_size, #TODO: Make sure that hidden_size is doing what we want it to be doing
             4 * hidden_size,
             1,
             activation=jax.nn.silu,
@@ -473,11 +474,15 @@ class UNet(eqx.Module):
             eqx.nn.Conv2d(hidden_size, data_channels, 1, key=keys[7]),
         ]
 
-    def __call__(self, t, x, y, v=None, *, key=None):
-        # Normalise t between -1 and 1
-        # t = 2 * (1 - (1 - t / self.t1) ** 4) - 1
+    def __call__(self, tI, v=None, *, key=None):
+        B = tI.shape[0]
+        C, H, W = self.data_shape
+        t = tI[:, :1]
+        y, x_flat = tI[:, 1 : self.y_dim + 1], tI[:, 1 + self.y_dim : ]
+        x = x_flat.reshape(B, C, H, W)
+
         t = self.time_pos_emb(t)
-        t = self.mlp_t(t)
+        t = self.mlp_t(t) #Here we're using an MLP to fit dimension of t, y to the perm fields.
         y = self.mlp_y(y)
         if v is None:
             in_ = x
