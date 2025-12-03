@@ -29,6 +29,6 @@ MCMC:
     # Number of independent MCMC chains to run
     nchains: 1
     # Number of samples in each chain
-    nsamples: 50000
+    nsamples: 153000
     burnin: 3000
 

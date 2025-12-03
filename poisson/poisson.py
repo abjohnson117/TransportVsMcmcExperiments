@@ -426,8 +426,8 @@ if __name__ == "__main__":
     }
 
     json_path = os.path.join(output_dir, "solver_stats.json")
-    with open(json_path, "w") as f:
-        json.dump(solver_results, f, indent=4)
+    with open(json_path, "w") as ff:
+        json.dump(solver_results, ff, indent=4)
 
     #
     #  Set up ModPieces for implementing MCMC methods
