@@ -103,8 +103,8 @@ class ResnetBlock(eqx.Module):
     down: bool
     dropout_rate: float
     time_emb_dim: int
-    y_emb_dim: int
-    mlp_layers: List[Union[FunctionType, eqx.nn.Linear]]
+    mlp_layers_t: List[Union[FunctionType, eqx.nn.Linear]]
+    mlp_layers_y: List[Union[FunctionType, eqx.nn.Linear]]
     scaling: Union[None, FunctionType, eqx.nn.ConvTranspose2d, eqx.nn.Conv2d]
     block1_groupnorm: eqx.nn.GroupNorm
     block1_conv: eqx.nn.Conv2d
@@ -241,7 +241,12 @@ class UNet(eqx.Module):
     data_shape: Tuple[int, int, int]
     time_pos_emb: SinusoidalPosEmb
     y_dim: int
-    mlp: eqx.nn.MLP
+    u_dim: int
+    nx: int
+    ny: int
+    mlp_t: eqx.nn.MLP
+    mlp_y: eqx.nn.MLP
+    vel_y: eqx.nn.MLP
     first_conv: eqx.nn.Conv2d
     down_res_blocks: List[List[ResnetBlock]]
     mid_block1: ResnetBlock
@@ -266,13 +271,15 @@ class UNet(eqx.Module):
         key
     ):
 
-        keys = jax.random.split(key, 8)
+        keys = jax.random.split(key, 11)
         del key
 
         data_channels, in_height, in_width = data_shape # Have to make sure that the u data is unsqueezed at axis 0.
         self.data_shape = data_shape
-        y_dim = yu_dimension[0]
+        y_dim, u_dim = yu_dimension
         self.y_dim = y_dim
+        self.u_dim = u_dim
+        self.nx = self.ny = int(math.sqrt(u_dim))
 
         if langevin:
             in_channels = 2 * data_channels
@@ -321,7 +328,7 @@ class UNet(eqx.Module):
                     up=False,
                     down=False,
                     time_emb_dim=hidden_size,
-                    y_emb_dim=hidden_size, #TODO: is this y_dim here? Or hidden_size. My hunch is that this is actually hidden_size, i.e., the output of the MLP from before. I think it is.
+                    y_emb_dim=hidden_size,
                     dropout_rate=dropout_rate,
                     is_attn=is_attn,
                     heads=heads,
@@ -474,16 +481,27 @@ class UNet(eqx.Module):
             eqx.nn.Conv2d(hidden_size, data_channels, 1, key=keys[7]),
         ]
 
+        self.vel_y = eqx.nn.MLP(
+            in_size=1 + y_dim,
+            out_size=y_dim,
+            width_size=4 * y_dim,
+            depth=3,
+            activation=jax.nn.silu,
+            key=keys[8],
+        )
     def __call__(self, tI, v=None, *, key=None):
-        B = tI.shape[0]
-        C, H, W = self.data_shape
-        t = tI[:, :1]
-        y, x_flat = tI[:, 1 : self.y_dim + 1], tI[:, 1 + self.y_dim : ]
-        x = x_flat.reshape(B, C, H, W)
+        # Right now, tI has shape (1089,), so the training is vmapped. 
+        C, H, W = self.data_shape # This should be (1, 32, 32) -> always nx - 1, ny - 1
+        # t = tI[:, :1]
+        # y, x_flat = tI[:, 1 : self.y_dim + 1], tI[:, 1 + self.y_dim : ]
+        t0 = tI[0]
+        y0, x_flat = tI[1 : self.y_dim + 1], tI[self.y_dim + 1 : ]
+        # B = x_flat.shape[0]
+        x = x_flat.reshape(C, H, W)
 
-        t = self.time_pos_emb(t)
+        t = self.time_pos_emb(t0)
         t = self.mlp_t(t) #Here we're using an MLP to fit dimension of t, y to the perm fields.
-        y = self.mlp_y(y)
+        y = self.mlp_y(y0)
         if v is None:
             in_ = x
         else:
@@ -513,4 +531,8 @@ class UNet(eqx.Module):
 
         for layer in self.final_conv_layers:
             h = layer(h)
-        return h
+        # print(h.flatten().shape)
+        v_u = h.reshape(-1)
+        v_y = self.vel_y(jnp.hstack([t0, y0]))
+        velocity = jnp.hstack([v_y, v_u])
+        return velocity

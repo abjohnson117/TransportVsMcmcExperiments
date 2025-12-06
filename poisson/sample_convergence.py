@@ -143,7 +143,7 @@ configs = {
 
 run = wandb.init(
     # set the wandb project where this run will be logged
-    project="Poisson - SI v hMALA - on PCA space",
+    project="Poisson - SI v hMALA - big network",
     config=configs,
     name=f"run={RANK}_ode_convergence"
 )
@@ -358,12 +358,12 @@ print(
 seed = 42
 n_projections = 4024
 random_idxs = np.random.choice(len(us_ref_pca), (20000,))
-# base_swd = swd(
-#     us_ref[random_idxs, :], hmala_samps, n_projections=n_projections, seed=seed
-# )
 base_swd = swd(
-    us_ref_pca[random_idxs, :], hmala_pca, n_projections=n_projections, seed=seed
+    us_ref[random_idxs, :], hmala_samps, n_projections=n_projections, seed=seed
 )
+# base_swd = swd(
+#     us_ref_pca[random_idxs, :], hmala_pca, n_projections=n_projections, seed=seed
+# )
 print(f"This is the base swd: {base_swd}")
 
 sample_no_list = [2**i for i in range(1, 15)]
@@ -371,6 +371,19 @@ sample_no_list.append(nsamples)
 sample_no_list.append(30000)
 sample_no_list.append(40000)
 sample_no_list.append(train_dim)
+hidden_layer_list = [2] * 6
+hidden_layer_list += [4] * 9
+hidden_layer_list += [8] * 2
+hidden_layer_list += [14] * 2
+width_list = [256] * 6
+width_list += [512] * 9
+width_list += [1024] * 2
+width_list += [2048] * 2
+steps_list = [10000] * 12
+steps_list += [750000] * 3
+steps_list += [150000] * 2
+steps_list += [300000] * 2
+
 # sample_no_list = [2, 8, 20000, train_dim]
 
 mmd_array = np.zeros(len(sample_no_list))
@@ -405,9 +418,11 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     # else:
     #     batch_size = configs["batch_size"]
     batch_size = hyperparams["batch_size"]
+    batch_size = 1000
     # steps = 50000
-    steps = 10000
-    print_every = 5000
+    # steps = 100000
+    steps = steps_list[i]
+    print_every = 10000
     yu_dimension = (100, k.item())
     dim = yu_dimension[0] + yu_dimension[1]
     hidden_layer_list = [hyperparams["hidden_layer"]] * hyperparams["num_hidden_layers"]
@@ -419,18 +434,20 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         activation = jax.nn.celu
     elif hyperparams["activation"] == "selu":
         activation = jax.nn.selu
-
+    hidden_layer_list_loop = hidden_layer_list[i] * width_list[i]
     model = MLP(
         key=key2,
         dim=dim,
         time_varying=True,
         w=hidden_layer_list,
         num_layers=len(hidden_layer_list) + 1,
-        activation_fn=activation,  # GeLU worked well
+        # activation_fn=activation,  # GeLU worked well
+        activation_fn=jax.nn.gelu,
     )
     schedule = optax.warmup_cosine_decay_schedule(
         init_value=0.0,
-        peak_value=hyperparams["peak_value"],
+        # peak_value=hyperparams["peak_value"],
+        peak_value=3e-4,
         warmup_steps=2_000,
         decay_steps=steps,
         end_value=1e-5,
@@ -447,7 +464,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     elif hyperparams["optimizer"] == "adamaxw":
         opt = optax.adagrad
 
-    optimizer = optax.chain(optax.clip_by_global_norm(1.0), opt(schedule))
+    optimizer = optax.chain(optax.clip_by_global_norm(1.0), optax.adamw(schedule))
     # interpolant = configs["interpolant"]
     # interpolant_der = configs["interpolant_der"]
     if hyperparams["interpolant"] == "linear_interpolant":
@@ -463,6 +480,9 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         interpolant_der = trig_interpolant_der
     elif hyperparams["interpolant_der"] == "sigmoid_interpolant_der":
         interpolant_der = sigmoid_interpolant_der
+
+    interpolant = linear_interpolant
+    interpolant_der = linear_interpolant_der
     interpolant_args = {"t": None, "x1": None, "x0": None}
 
     trainer = NNTrainer(
@@ -508,25 +528,25 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
 
     print("Calculating MMD...")
     mmd_array[i] = MMD(u_samples_gen, hmala_pca)
-    rel_err_array[i] = (
-        swd(u_samples_gen, hmala_pca, n_projections=n_projections, seed=seed) / base_swd
-    )
     # rel_err_array[i] = (
-    #     swd(
-    #         u_samples.reshape(nsamples, nx * ny),
-    #         jnp.asarray(hmala_samps),
-    #         n_projections=n_projections,
-    #         seed=seed,
-    #     )
-    #     / base_swd
+    #     swd(u_samples_gen, hmala_pca, n_projections=n_projections, seed=seed) / base_swd
     # )
+    rel_err_array[i] = (
+        swd(
+            u_samples.reshape(nsamples, nx * ny),
+            jnp.asarray(hmala_samps),
+            n_projections=n_projections,
+            seed=seed,
+        )
+        / base_swd
+    )
     wandb.log({"relative error (swd)": rel_err_array[i]}, step=sample_no)
     # ref_indices = np.random.choice(20000)
     # rel_err_array[i] = (MMD(u_samples_gen, us_ref_pca[ref_indices, :]) ** 2) / (MMD(hmala_samps, us_ref_pca[ref_indices, :]) ** 2)
     mmd_array_no_pca[i] = MMD(u_samples.reshape(nsamples, nx * ny), hmala_samps)
     rel_error_no_pca[i] = get_kme(u_samples.reshape(nsamples, nx * ny), hmala_samps)
-    # wandb.log({"relative error (mmd)": rel_error_no_pca[i]}, step=sample_no)
-    wandb.log({"relative error (mmd)": mmd_array[i]}, step=sample_no)
+    wandb.log({"relative error (mmd)": rel_error_no_pca[i]}, step=sample_no)
+    # wandb.log({"relative error (mmd)": mmd_array[i]}, step=sample_no)
     print(f"This is the MMD: {mmd_array[i]}")
     print(f"This is the calculated relative error: {rel_err_array[i]}")
     print(f"This is the MMD (no PCA): {mmd_array_no_pca[i]}")
