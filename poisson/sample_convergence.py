@@ -434,13 +434,13 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         activation = jax.nn.celu
     elif hyperparams["activation"] == "selu":
         activation = jax.nn.selu
-    hidden_layer_list_loop = hidden_layer_list[i] * width_list[i]
+    hidden_layer_list_loop = hidden_layer_list[i] * [width_list[i]]
     model = MLP(
         key=key2,
         dim=dim,
         time_varying=True,
-        w=hidden_layer_list,
-        num_layers=len(hidden_layer_list) + 1,
+        w=hidden_layer_list_loop,
+        num_layers=len(hidden_layer_list_loop) + 1,
         # activation_fn=activation,  # GeLU worked well
         activation_fn=jax.nn.gelu,
     )

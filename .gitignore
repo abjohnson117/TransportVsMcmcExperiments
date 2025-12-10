@@ -185,6 +185,7 @@ poisson/convergence_results_sde_med
 poisson/convergence_results_sde_98
 poisson/convergence_results_pca
 poisson/mcmc_chains
+poisson/sl-data
 broken_poisson_rootlock
 poisson/convergence_results
 poisson/convergence_results_med
