@@ -21,7 +21,7 @@ import muq.SamplingAlgorithms as ms
 import hippylib2muq as hm
 import argparse
 
-run_mcmc = True
+run_mcmc = False
 has_data = False
 
 def get_data(arg, vec, mesh):
@@ -112,6 +112,20 @@ def paramcoord2eigencoord(V, B, x):
 
     return VtBX.transpose()
 
+def circle_phantom(n=256, radius=0.8, center=None, value=np.log(20.0)):
+    if center is None:
+        center = (n/2, n/2)
+
+    y, x = np.ogrid[:n, :n]
+    cx, cy = center
+    r_pix = radius * (n/2)
+
+    mask = (x - cx)**2 + (y - cy)**2 <= r_pix**2
+    img = np.zeros((n, n), dtype=float)
+    img[mask] = value
+    img[~mask] = np.log(3.0)
+    return img
+
 if __name__ == "__main__":
     with open("poisson.yaml") as fid:
         inargs = yaml.full_load(fid)
@@ -124,6 +138,7 @@ if __name__ == "__main__":
     # Set up the mesh and finite element function spaces
     #
     nx = ny = inargs["nelement"]
+    # nx = ny = 32
     mesh = dl.UnitSquareMesh(nx, ny)
 
     Vh2 = dl.FunctionSpace(mesh, "Lagrange", 2)
@@ -157,8 +172,10 @@ if __name__ == "__main__":
     #
     # Set up the prior
     #
-    gamma = 1.0
-    delta = 9.0
+    # gamma = 1.0
+    # delta = 9.0
+    gamma = 0.1
+    delta = 0.7
     anis_diff = dl.Identity(
         2
     )
@@ -175,7 +192,7 @@ if __name__ == "__main__":
     #  Set up the misfit functional and generate synthetic observations
     #
     ntargets = 100
-    rel_noise = 1e-6
+    rel_noise = 1e-5
 
     print("Number of observation points: {0}".format(ntargets))
     # targets = np.random.uniform(0.05, 0.95, [ntargets, 2])
@@ -194,17 +211,21 @@ if __name__ == "__main__":
     # )
 
     #Getting mtrue
-    phantom = shepp_logan_phantom()
-    phantom = resize(phantom, (nx+1, ny+1), anti_aliasing=True)
-    m_min, m_max = -1.1, 1.1
-    p = phantom
-    p_norm = (p - p.min()) / (p.max() - p.min())  # normalize to [0,1]
-    m_true_array = m_min + p_norm * (m_max - m_min)
-    m_true_array = m_true_array.reshape((nx+1) * (ny+1))
+    # phantom = shepp_logan_phantom()
+    # phantom = resize(phantom, (nx+1, ny+1), anti_aliasing=True)
+    # m_min, m_max = 3, 20
+    # p = phantom
+    # p_norm = (p - p.min()) / (p.max() - p.min())  # normalize to [0,1]
+    # m_true_array = m_min + p_norm * (m_max - m_min)
+    # m_true_array = m_true_array.reshape((nx+1) * (ny+1))
+    m_true_array = circle_phantom(n=(nx+1)).reshape((nx+1) * (ny+1))
     mtrue = true_model(prior)
+    plt.imshow(get_data(Vh[hp.PARAMETER], mtrue, mesh), origin="lower", interpolation="bilinear")
+    plt.savefig(os.path.join(output_dir, "prior_sample.png"))
     # mtrue = dl.Function(Vh[hp.PARAMETER])
     mtrue.set_local(m_true_array)
-    plt.imshow(mtrue.get_local().reshape(33, 33), origin="lower", cmap="Greys")
+    # plt.imshow(get_data(Vh[hp.PARAMETER], mtrue, mesh), origin="lower", cmap="Greys")
+    plt.imshow(mtrue.get_local().reshape((nx+1), (nx+1)), origin="lower", cmap="Greys")
     plt.savefig(os.path.join(output_dir, "mtrue.png"))
     # mtrue.vector().apply("insert")
 
@@ -220,33 +241,38 @@ if __name__ == "__main__":
     misfit.B.mult(x[hp.STATE], misfit.d)
     MAX = misfit.d.norm("linf")
     noise_std_dev = rel_noise * MAX
-    misfit.noise_variance = rel_noise
+    misfit.noise_variance = noise_std_dev ** 2
+    misfit.noise_variance = 1e-8
+    # print(f"This is the relative error in misfit: {d_diff.norm("linf") / d.norm("l2")}")
+
 
     hp.parRandom.normal_perturb(noise_std_dev, misfit.d)
 
     y = misfit.d.get_local()
-    # u = get_data(Vh[hp.PARAMETER], mtrue, mesh).reshape((nx + 1) * (ny + 1))
-    u = mtrue.get_local()
+    u = get_data(Vh[hp.PARAMETER], mtrue, mesh).reshape((nx + 1) * (ny + 1))
+    # u = mtrue.get_local()
     yu = np.concatenate((y, u))
     np.save(os.path.join(output_dir, "data_sl.npy"), yu)
     print("Finished saving data")
+    model = hp.Model(pde, prior, misfit)
+
+    # m = prior.mean.copy()
+    m = mtrue.copy()
+    solver = hp.ReducedSpaceNewtonCG(model)
+    solver.parameters["rel_tolerance"] = 1e-6
+    solver.parameters["abs_tolerance"] = 1e-12
+    solver.parameters["max_iter"] = 25
+    solver.parameters["GN_iter"] = 5
+    solver.parameters["globalization"] = "LS"
+    solver.parameters["LS"]["c_armijo"] = 1e-4
+
+    x = solver.solve([None, m, None])
+    map_array = get_data(Vh[hp.PARAMETER], x[hp.PARAMETER], mesh)
+    im0 = plt.imshow(x[hp.PARAMETER].get_local().reshape((nx+1),(ny+1)), origin="lower", interpolation="bilinear")
+    plt.colorbar(im0, fraction=0.046, pad=0.04)
+    plt.savefig(os.path.join(output_dir, "map.png"))
 
     if run_mcmc == True:
-        model = hp.Model(pde, prior, misfit)
-
-        m = prior.mean.copy()
-        solver = hp.ReducedSpaceNewtonCG(model)
-        solver.parameters["rel_tolerance"] = 1e-6
-        solver.parameters["abs_tolerance"] = 1e-12
-        solver.parameters["max_iter"] = 25
-        solver.parameters["GN_iter"] = 5
-        solver.parameters["globalization"] = "LS"
-        solver.parameters["LS"]["c_armijo"] = 1e-4
-
-        x = solver.solve([None, m, None])
-        map_array = get_data(Vh[hp.PARAMETER], x[hp.PARAMETER], mesh)
-        plt.imshow(map_array, origin="lower", interpolation="bilinear")
-        plt.savefig(os.path.join(output_dir, "map.png"))
         # np.save(
         #     os.path.join(output_root, "map_param_grid.npy"),
         #     map_array,
