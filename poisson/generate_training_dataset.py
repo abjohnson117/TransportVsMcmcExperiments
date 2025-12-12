@@ -32,6 +32,30 @@ def get_data(arg, vec, mesh):
     reshape_dim = int(np.sqrt(C.shape[0]))
     return C.reshape(reshape_dim, reshape_dim)
 
+def fe_function_to_image(V, func):
+    """
+    V    : FunctionSpace
+    func : dolfin.Function on V
+
+    Returns image of shape (ny, nx) in a consistent (y,x) ordering.
+    """
+    # Coordinates of each DOF (for CG1, these are vertex coords)
+    dof_coords = V.tabulate_dof_coordinates()
+    dof_coords = dof_coords.reshape((-1, 2))  # (ndofs, 2)
+
+    values = func.get_local()
+
+    xs = np.unique(dof_coords[:, 0])
+    ys = np.unique(dof_coords[:, 1])
+    nx, ny = len(xs), len(ys)
+
+    # Sort DOFs by (y, x) or (x, y); choose one convention and stick to it.
+    order = np.lexsort((dof_coords[:, 0], dof_coords[:, 1]))  # sort by y, then x
+
+    img = values[order].reshape(ny, nx)
+    return img
+
+
 
 def u_boundary(x, on_boundary):
     """
@@ -109,7 +133,8 @@ def generate_sample(mesh, Vh, pde, prior):
     try:
         mtrue = true_model(prior)
         parameter_array = get_data(Vh[hp.PARAMETER], mtrue, mesh)
-        # parameter_array = mtrue.get_local().reshape(33, 33)
+        # parameter_array = fe_function_to_image(Vh[hp.PARAMETER], mtrue)
+        # parameter_array = mtrue.get_local().reshape(33, 33, order="F")
         n_side = 10
         grid_1d = np.linspace(0.05, 0.95, n_side)
         X, Y = np.meshgrid(grid_1d, grid_1d)
@@ -119,7 +144,8 @@ def generate_sample(mesh, Vh, pde, prior):
 
         utrue = pde.generate_state()
         state_array = get_data(Vh[hp.STATE], utrue, mesh)
-        # state_array = utrue.get_local().reshape(int(np.sqrt(4225)), int(np.sqrt(4225)))
+        # state_array = fe_function_to_image(Vh[hp.STATE], utrue)
+        # state_array = utrue.get_local().reshape(int(np.sqrt(4225)), int(np.sqrt(4225)), order="F")
 
         x = [utrue, mtrue, None]
         pde.solveFwd(x[hp.STATE], x)

@@ -31,6 +31,45 @@ def get_data(arg, vec, mesh):
     reshape_dim = int(np.sqrt(C.shape[0]))
     return C.reshape(reshape_dim, reshape_dim)
 
+import numpy as np
+import dolfin as dl
+
+def image_flat_to_dof_flat(V, img_flat, nx, ny):
+    """
+    V        : FunctionSpace (e.g. Vh[hp.PARAMETER])
+    img_flat : 1D array of length (nx+1)*(ny+1) in row-major (y,x) order
+               coming from circle_phantom(...).reshape(-1)
+    nx, ny   : number of cells in x,y (so img is (ny+1, nx+1))
+    Returns : 1D array in DOF ordering, ready for set_local.
+    """
+    dof_coords = V.tabulate_dof_coordinates().reshape(-1, 2)
+    xs = dof_coords[:, 0]
+    ys = dof_coords[:, 1]
+
+    # infer physical bounds
+    xmin, xmax = xs.min(), xs.max()
+    ymin, ymax = ys.min(), ys.max()
+
+    # spacing between grid points
+    hx = (xmax - xmin) / nx
+    hy = (ymax - ymin) / ny
+
+    # for each DOF, find which (i,j) pixel it should take from the image
+    ix = np.round((xs - xmin) / hx).astype(int)  # column index (x)
+    iy = np.round((ys - ymin) / hy).astype(int)  # row index (y)
+
+    # clip to be safe
+    ix = np.clip(ix, 0, nx)
+    iy = np.clip(iy, 0, ny)
+
+    # row-major index in the flattened image: j * (nx+1) + i
+    flat_index = iy * (nx + 1) + ix   # length = ndofs
+
+    # img_flat is in row-major order already
+    values_dof_order = img_flat[flat_index]
+    return values_dof_order
+
+
 
 def u_boundary(x, on_boundary):
     """
@@ -112,7 +151,7 @@ def paramcoord2eigencoord(V, B, x):
 
     return VtBX.transpose()
 
-def circle_phantom(n=256, radius=0.8, center=None, value=np.log(20.0)):
+def circle_phantom(n=256, radius=0.8, center=None, value=np.log(40)):
     if center is None:
         center = (n/2, n/2)
 
@@ -123,7 +162,7 @@ def circle_phantom(n=256, radius=0.8, center=None, value=np.log(20.0)):
     mask = (x - cx)**2 + (y - cy)**2 <= r_pix**2
     img = np.zeros((n, n), dtype=float)
     img[mask] = value
-    img[~mask] = np.log(3.0)
+    img[~mask] = np.log(3)
     return img
 
 if __name__ == "__main__":
@@ -174,8 +213,8 @@ if __name__ == "__main__":
     #
     # gamma = 1.0
     # delta = 9.0
-    gamma = 0.1
-    delta = 0.7
+    gamma = 1.0
+    delta = 9.0
     anis_diff = dl.Identity(
         2
     )
@@ -192,7 +231,7 @@ if __name__ == "__main__":
     #  Set up the misfit functional and generate synthetic observations
     #
     ntargets = 100
-    rel_noise = 1e-5
+    rel_noise = 1e-6
 
     print("Number of observation points: {0}".format(ntargets))
     # targets = np.random.uniform(0.05, 0.95, [ntargets, 2])
@@ -219,13 +258,17 @@ if __name__ == "__main__":
     # m_true_array = m_min + p_norm * (m_max - m_min)
     # m_true_array = m_true_array.reshape((nx+1) * (ny+1))
     m_true_array = circle_phantom(n=(nx+1)).reshape((nx+1) * (ny+1))
+    values_dof = image_flat_to_dof_flat(Vh[hp.PARAMETER], m_true_array, nx, ny)
+    # m_true_array = circle_phantom(n=(nx+1))
     mtrue = true_model(prior)
-    plt.imshow(get_data(Vh[hp.PARAMETER], mtrue, mesh), origin="lower", interpolation="bilinear")
-    plt.savefig(os.path.join(output_dir, "prior_sample.png"))
+    # plt.imshow(get_data(Vh[hp.PARAMETER], mtrue, mesh), origin="lower", interpolation="bilinear")
+    # plt.savefig(os.path.join(output_dir, "prior_sample.png"))
     # mtrue = dl.Function(Vh[hp.PARAMETER])
-    mtrue.set_local(m_true_array)
-    # plt.imshow(get_data(Vh[hp.PARAMETER], mtrue, mesh), origin="lower", cmap="Greys")
-    plt.imshow(mtrue.get_local().reshape((nx+1), (nx+1)), origin="lower", cmap="Greys")
+    mtrue.set_local(values_dof)
+    # mtrue.set_local(m_true_array)
+    # mtrue = image_to_fe_function(Vh[hp.PARAMETER], m_true_array)
+    plt.imshow(get_data(Vh[hp.PARAMETER], mtrue, mesh), origin="lower", cmap="Greys")
+    # plt.imshow(mtrue.get_local().reshape((nx+1), (nx+1)), origin="lower", cmap="Greys")
     plt.savefig(os.path.join(output_dir, "mtrue.png"))
     # mtrue.vector().apply("insert")
 
@@ -242,13 +285,15 @@ if __name__ == "__main__":
     MAX = misfit.d.norm("linf")
     noise_std_dev = rel_noise * MAX
     misfit.noise_variance = noise_std_dev ** 2
-    misfit.noise_variance = 1e-8
+    misfit.noise_variance = 1e-6
     # print(f"This is the relative error in misfit: {d_diff.norm("linf") / d.norm("l2")}")
 
 
     hp.parRandom.normal_perturb(noise_std_dev, misfit.d)
 
     y = misfit.d.get_local()
+    # y = get_data(Vh[hp.STATE], misfit.d, mesh)
+    print(y.shape)
     u = get_data(Vh[hp.PARAMETER], mtrue, mesh).reshape((nx + 1) * (ny + 1))
     # u = mtrue.get_local()
     yu = np.concatenate((y, u))
@@ -268,7 +313,8 @@ if __name__ == "__main__":
 
     x = solver.solve([None, m, None])
     map_array = get_data(Vh[hp.PARAMETER], x[hp.PARAMETER], mesh)
-    im0 = plt.imshow(x[hp.PARAMETER].get_local().reshape((nx+1),(ny+1)), origin="lower", interpolation="bilinear")
+    np.save(os.path.join(output_dir, "map_array.npy"), map_array)
+    im0 = plt.imshow(map_array, origin="lower", interpolation="bilinear")
     plt.colorbar(im0, fraction=0.046, pad=0.04)
     plt.savefig(os.path.join(output_dir, "map.png"))
 

@@ -411,3 +411,20 @@ python3 sl.py
 python3 sl.py 
 python3 sl.py 
 python3 sl.py 
+python3 sl.py 
+nohup python3 -u generate_training_dataset.py > data.log 2>&1 &
+nohup python3 -u generate_training_dataset.py > data.log 2>&1 &
+nohup python3 -u generate_training_dataset.py > data.log 2>&1 &
+nohup python3 -u generate_training_dataset.py > data.log 2>&1 &
+nohup python3 -u generate_training_dataset.py > data.log 2>&1 &
+nohup python3 -u generate_training_dataset.py > data.log 2>&1 &
+nohup python3 -u generate_training_dataset.py > data.log 2>&1 &
+nohup python3 -u generate_training_dataset.py > data.log 2>&1 &
+nohup python3 -u generate_training_dataset.py > data.log 2>&1 &
+nohup python3 -u generate_training_dataset.py > data.log 2>&1 &
+nohup python3 -u generate_training_dataset.py > data.log 2>&1 &
+python3 sl.py 
+python3 sl.py 
+nohup python3 -u generate_training_dataset.py > data.log 2>&1 &
+nohup python3 -u generate_training_dataset.py > data.log 2>&1 &
+python3 sl.py 
