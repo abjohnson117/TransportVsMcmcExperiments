@@ -22,7 +22,7 @@ import hippylib2muq as hm
 ntargets = 100
 # rel_noise = 0.005
 # rel_noise = 0.25
-rel_noise = 1e-6
+rel_noise = 1e-8
 # rel_noise = 0.001
 
 def get_data(arg, vec, mesh):
@@ -116,11 +116,11 @@ def setup_problem(yamlfile):
 
     pde = hp.PDEVariationalProblem(Vh, pde_varf, bc, bc0, is_fwd_linear=True)
 
-    # gamma = 1.0
+    gamma = 1.0
     # delta = 1.0 # This was 9.0
-    # delta = 9.0
-    gamma = 0.1
-    delta = 0.7
+    delta = 9.0
+    # gamma = 0.1
+    # delta = 0.7
     anis_diff = dl.Identity(2) # TODO: Try to get rid of anis_diff here and see if it makes any difference
 
     prior = hp.BiLaplacianPrior(

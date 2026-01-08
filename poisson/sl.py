@@ -21,7 +21,7 @@ import muq.SamplingAlgorithms as ms
 import hippylib2muq as hm
 import argparse
 
-run_mcmc = False
+run_mcmc = True
 has_data = False
 
 def get_data(arg, vec, mesh):
@@ -231,7 +231,7 @@ if __name__ == "__main__":
     #  Set up the misfit functional and generate synthetic observations
     #
     ntargets = 100
-    rel_noise = 1e-6
+    rel_noise = 1e-8
 
     print("Number of observation points: {0}".format(ntargets))
     # targets = np.random.uniform(0.05, 0.95, [ntargets, 2])
@@ -241,13 +241,6 @@ if __name__ == "__main__":
     targets = np.vstack([X.ravel(), Y.ravel()]).T
 
     misfit = hp.PointwiseStateObservation(Vh[hp.STATE], targets)
-
-    # mtrue = true_model(prior)
-    # mtrue_array = get_data(Vh[hp.PARAMETER], mtrue, mesh)
-    # np.save(
-    #     os.path.join(output_root, "true_param_grid.npy"),
-    #     mtrue_array,
-    # )
 
     #Getting mtrue
     # phantom = shepp_logan_phantom()
@@ -261,41 +254,26 @@ if __name__ == "__main__":
     values_dof = image_flat_to_dof_flat(Vh[hp.PARAMETER], m_true_array, nx, ny)
     # m_true_array = circle_phantom(n=(nx+1))
     mtrue = true_model(prior)
-    # plt.imshow(get_data(Vh[hp.PARAMETER], mtrue, mesh), origin="lower", interpolation="bilinear")
-    # plt.savefig(os.path.join(output_dir, "prior_sample.png"))
-    # mtrue = dl.Function(Vh[hp.PARAMETER])
     mtrue.set_local(values_dof)
-    # mtrue.set_local(m_true_array)
-    # mtrue = image_to_fe_function(Vh[hp.PARAMETER], m_true_array)
     plt.imshow(get_data(Vh[hp.PARAMETER], mtrue, mesh), origin="lower", cmap="Greys")
-    # plt.imshow(mtrue.get_local().reshape((nx+1), (nx+1)), origin="lower", cmap="Greys")
     plt.savefig(os.path.join(output_dir, "mtrue.png"))
-    # mtrue.vector().apply("insert")
 
     utrue = pde.generate_state()
-    # utrue_array = get_data(Vh[hp.STATE], utrue, mesh)
-    # np.save(
-    #     os.path.join(output_root, "true_state_grid.npy"),
-    #     utrue_array,
-    # )
 
     x = [utrue, mtrue, None]
     pde.solveFwd(x[hp.STATE], x)
     misfit.B.mult(x[hp.STATE], misfit.d)
     MAX = misfit.d.norm("linf")
     noise_std_dev = rel_noise * MAX
-    misfit.noise_variance = noise_std_dev ** 2
-    misfit.noise_variance = 1e-6
-    # print(f"This is the relative error in misfit: {d_diff.norm("linf") / d.norm("l2")}")
+    # misfit.noise_variance = noise_std_dev ** 2
+    misfit.noise_variance = 1e-8
 
 
     hp.parRandom.normal_perturb(noise_std_dev, misfit.d)
 
     y = misfit.d.get_local()
-    # y = get_data(Vh[hp.STATE], misfit.d, mesh)
     print(y.shape)
     u = get_data(Vh[hp.PARAMETER], mtrue, mesh).reshape((nx + 1) * (ny + 1))
-    # u = mtrue.get_local()
     yu = np.concatenate((y, u))
     np.save(os.path.join(output_dir, "data_sl.npy"), yu)
     print("Finished saving data")
@@ -319,10 +297,6 @@ if __name__ == "__main__":
     plt.savefig(os.path.join(output_dir, "map.png"))
 
     if run_mcmc == True:
-        # np.save(
-        #     os.path.join(output_root, "map_param_grid.npy"),
-        #     map_array,
-        # )
 
         if solver.converged:
             print("\nConverged in ", solver.it, " iterations.")
