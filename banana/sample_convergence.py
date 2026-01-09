@@ -96,6 +96,7 @@ samps = np.load("rej_samples_1.npy")[
 ]
 swd_mcmc = np.load("swd_array_mcmc.npy")
 mmd_mcmc = np.load("mmd_array_mcmc.npy")
+ksd_mcmc = np.load("ksd_array_mcmc.npy")
 us_base = rng.randn(nsamples, 1)
 print("About to calculate swd...")
 base_swd = swd(
@@ -264,9 +265,10 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     )
     # wandb.log({"relative error (swd) - mcmc": swd_mcmc[i]}, step=sample_no)
     wandb.log({"relative error (mmd)": mmd_array[i], "relative error (mmd) - mcmc": mmd_mcmc[i]}, step=sample_no)
-    wandb.log({"relative error (ksd)": ksd_array[i]}, step=sample_no)
+    wandb.log({"relative error (ksd)": ksd_array[i], "relative error (ksd) - mcmc": ksd_mcmc[i] / base_ksd}, step=sample_no)
     print(f"This is the relative MMD error: {mmd_array[i]}")
     print(f"This is the relative SWD error: {swd_array[i]}")
+    print(f"This is the relative KSD error: {ksd_array[i]}")
 
 print("Successfully trained all models and now saving results!")
 np.save(os.path.join(output_dir, "nn_conv_mmd.npy"), mmd_array)
