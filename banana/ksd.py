@@ -3,6 +3,7 @@ from scipy.spatial.distance import cdist
 from triangular_transport.kernels.kernel_tools import get_gaussianRBF, vectorize_kfunc
 from jax import vmap, grad, jit, random
 import jax.numpy as jnp
+from functools import partial
 
 def median_heuristic_sigma_jax(X, Y=None, max_points=5000, seed=0):
     X = jnp.asarray(X).reshape(X.shape[0], -1)
@@ -84,14 +85,17 @@ def rbf_kernel(X, Y=None, bandwidth=None, compute_grad=False):
         bandwidth = np.sqrt(0.5 * np.median(pairwise_dists))
     # evaluate kernel    
     K = np.exp(-pairwise_dists / (2 * bandwidth ** 2))
+    # print(f"These are the first 5 elements of pairwise_dists: {pairwise_dists[0, :5]}") #same
     if compute_grad is True:
         # Compute gradient of the kernel
         X_expanded = X[:, np.newaxis, :]  # (n, 1, d)
         Y_expanded = Y[np.newaxis, :, :]  # (1, m, d)
         diff = X_expanded - Y_expanded  # shape (n, m, d)
         K_grad = -diff / (bandwidth ** 2) * K[:, :, None]
+        # print(f"this is the first 5 elements of K_grad: {K_grad[0, :5]}") #same
         # compute second trace derivative (Hessian) of the kernel
         trK_gradgrad = K * (pairwise_dists - X.shape[1] * bandwidth**2) / (bandwidth**4)  # (n, m)
+        # print(f"this is trace of hessian: {trK_gradgrad}")
         return K, K_grad, trK_gradgrad
     # Return only the kernel matrix
     else:
@@ -112,37 +116,35 @@ def stein_kernel(X, score_func, bandwidth=None, kernel='rbf'):
         raise ValueError("score_func must be a callable function that takes X as input.")
     # Score terms
     term1 = score_X @ score_X.T * K  # s(x)^T s(y) k(x,y)
+    # print(f"This is term1: {term1[0, :5]}") #same
     term2 = np.einsum("ik,ijk->ij", score_X, K_grad)  # s(x)^T ∇_x k(x,y)
     term3 = np.einsum("jk,ijk->ij", score_X, -K_grad)  # s(y)^T ∇_y k(x,y)
     # Assemble the Stein kernel matrix
     H = term1 + term2 + term3 + trK_gradgrad
     return H
 
-@jit
-def stein_kernel_jax(X, score_func, bandwidth=None, kernel="rbf"):
-    if bandwidth is None:
-        bandwidth = median_heuristic_sigma_jax(X, X)
+@partial(jit, static_argnames=("score_func", "kernel"))
+def stein_kernel_jax(X, score_func, bandwidth, kernel="rbf"):
     if kernel == "rbf":
         k = get_gaussianRBF(bandwidth)
     kvec = vectorize_kfunc(k)
     K = kvec(X, X)
     pairwise_dists = (-1 * jnp.log(K)) * (2 * bandwidth ** 2)
+    # print(f"These are the first 5 elements of pairwise_dists: {pairwise_dists[0, :5]}") # same
 
-    X_expanded = X[:, jnp.newaxis, :]  # (n, 1, d)
-    Y_expanded = X[jnp.newaxis, :, :]  # (1, m, d)
-    diff = X_expanded - Y_expanded  # shape (n, m, d)
+    diff = X[:, None, :] - X[None, :, :]  # shape (n, m, d)
     K_grad = -diff / (bandwidth ** 2) * K[:, :, None]
+    # print(f"These are the first 5 elements of K_grad: {K_grad[0, :5]}") #same
     # compute second trace derivative (Hessian) of the kernel
     trK_grad2 = K * (pairwise_dists - X.shape[1] * bandwidth**2) / (bandwidth**4)  # (n, m)
+    # print(f"this is trace of hessian: {trK_grad2}") #same
     
-    if callable(score_func):
-        score_X = score_func(X)
-    else:
-        raise ValueError("score_func must be a callable that takes X as input.")
+    score_X = score_func(X)
     
     term1 = score_X @ score_X.T * K # s(x)^T s(y) k(x,y)
+    # print(f"This is term1: {term1[0, :5]}")
     term2 = jnp.einsum("ik, ijk->ij", score_X, K_grad) # s(x)^T ∇_x k(x,y)
-    term3 = jnp.einsum("ik, ijk->ij", score_X, -K_grad) # s(y)^T ∇_y k(x,y)
+    term3 = jnp.einsum("jk, ijk->ij", score_X, -K_grad) # s(y)^T ∇_y k(x,y)
 
     H = term1 + term2 + term3 + trK_grad2
     return H
@@ -150,10 +152,10 @@ def stein_kernel_jax(X, score_func, bandwidth=None, kernel="rbf"):
 def compute_ksd(X, score_func, bandwidth=None, kernel='rbf'):
     """ Computes the Kernel Stein Discrepancy for samples X. """
     H = stein_kernel(X, score_func, bandwidth=bandwidth, kernel=kernel)
-    ksd = np.sqrt(np.sum(H) / (X.shape[0] ** 2))
+    # ksd = np.sqrt(np.sum(H) / (X.shape[0] ** 2))
+    ksd = np.sum(H) / (X.shape[0] ** 2)
     return ksd
 
-@jit
 def compute_ksd_jax(X, score_func, bandwidth=None, kernel="rbf"):
     """Computes the Kernel Stein Discrepancy for samples X (target) using jax functionality"""
     H = stein_kernel_jax(X, score_func, bandwidth, kernel=kernel)

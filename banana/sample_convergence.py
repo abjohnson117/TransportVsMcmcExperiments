@@ -39,7 +39,7 @@ from triangular_transport.kernels.kernel_tools import (
     vectorize_kfunc,
     get_sum_of_kernels,
 )
-from ksd import compute_ksd
+from ksd import compute_ksd_jax, compute_ksd
 
 plt.style.use("ggplot")
 
@@ -75,7 +75,7 @@ args = parser.parse_args()
 RANK = args.run_id
 
 run = wandb.init(
-    project="2D Convergence - Banana - with ksd and mcmc",
+    project="2D Convergence - Banana - transport v mcmc - fix",
     name=f"run={RANK}-ode-converge",
 )
 
@@ -95,6 +95,7 @@ samps = np.load("rej_samples_1.npy")[
     np.random.choice(100000, size=(nsamples,)), :
 ]
 swd_mcmc = np.load("swd_array_mcmc.npy")
+mmd_mcmc = np.load("mmd_array_mcmc.npy")
 us_base = rng.randn(nsamples, 1)
 print("About to calculate swd...")
 base_swd = swd(
@@ -148,7 +149,11 @@ def log_density_V(u):
 
 
 score_V = vmap(vmap(grad(log_density_V)))
-base_ksd = compute_ksd(samps, score_V)
+bandwidth = median_heuristic_sigma_jax(samps)
+base_ksd = compute_ksd_jax(samps, score_V, bandwidth=bandwidth)
+base_ksd_no_jax = compute_ksd(samps, score_V)
+print(f"This is the base_ksd: {base_ksd}")
+print(f"This is the base ksd without jax: {base_ksd_no_jax}")
 
 sample_no_list = [2**i for i in range(1, 15)]
 sample_no_list.append(20000)
@@ -240,12 +245,12 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         )
 
         us_gen = cond_samples[:, 1:2]
-        mmd_iter_array[j] = MMD(us_gen, samps)
+        mmd_iter_array[j] = get_kme(us_gen, samps)
         swd_iter_array[j] = (
             swd(np.array(us_gen), samps, n_projections=n_projections, seed=seed)
             / base_swd
         )
-        ksd_iter_array[j] = compute_ksd(us_gen, score_V) / base_ksd
+        ksd_iter_array[j] = compute_ksd_jax(us_gen, score_V, bandwidth=bandwidth) / base_ksd
     mmd_array[i] = np.mean(mmd_iter_array)
     swd_array[i] = np.mean(swd_iter_array)
     ksd_array[i] = np.mean(ksd_iter_array)
@@ -253,12 +258,12 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     wandb.log(
         {
             "relative error (swd)": swd_array[i],
-            "relative error (swd) - mcmc": swd_mcmc[i],
+            "relative error (swd) - mcmc": swd_mcmc[i] / base_swd,
         },
         step=sample_no,
     )
     # wandb.log({"relative error (swd) - mcmc": swd_mcmc[i]}, step=sample_no)
-    wandb.log({"relative error (mmd)": mmd_array[i]}, step=sample_no)
+    wandb.log({"relative error (mmd)": mmd_array[i], "relative error (mmd) - mcmc": mmd_mcmc[i]}, step=sample_no)
     wandb.log({"relative error (ksd)": ksd_array[i]}, step=sample_no)
     print(f"This is the relative MMD error: {mmd_array[i]}")
     print(f"This is the relative SWD error: {swd_array[i]}")
