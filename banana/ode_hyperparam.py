@@ -20,7 +20,7 @@ import pickle
 import equinox as eqx
 from ot.sliced import sliced_wasserstein_distance as swd
 
-from ksd.py import median_heuristic_sigma_jax
+from ksd import median_heuristic_sigma_jax
 
 from triangular_transport.flows.flow_trainer import (
     NNTrainer,
@@ -166,8 +166,8 @@ class SiOdeSmac:
             ["adamw", "adam", "adagrad", "adamaxw"],
             default="adamw",
         )
-        hidden_layer = Integer("hidden_layer", (100, 300), default=256, log=True)
-        num_hidden_layers = Integer("num_hidden_layers", (2, 5), default=3, log=True)
+        hidden_layer = Integer("hidden_layer", (850, 1100), default=1000, log=True)
+        num_hidden_layers = Integer("num_hidden_layers", (7, 10), default=8, log=True)
         batch_size = Integer("batch_size", (100, 2000), default=128, log=True)
         peak_value = Float("peak_value", (1e-4, 1e-2), default=3e-4, log=True)
 
@@ -294,7 +294,7 @@ class SiOdeSmac:
             wandb.log({"relative error (swd + mmd)": loss})
         finally:
             del trainer, model
-            del cond_samples, u_samples_gen, u_samples
+            del cond_samples, u_samples_gen, us_gen
             del optimizer
             jax.clear_caches()
             gc.collect()
@@ -305,7 +305,7 @@ class SiOdeSmac:
 configs = {"dataset": "banana"}
 
 sep = "\n" + "#" * 80 + "\n"
-output_root = "hyperparam_results"
+output_root = "hyperparam_results_big_network"
 os.makedirs(output_root, exist_ok=True)
 
 
@@ -363,7 +363,7 @@ print(f"This is the base swd (-4.2): {base_swd4}")
 base_swd_list = [base_swd0, base_swd1, base_swd4]
 
 interpolant_args = {"t": None, "x1": None, "x0": None}
-epochs = 1000
+epochs = 2000
 yu_dimension = (1,1)
 x0_data = None
 sample_no_list = [2**i for i in range(1, 15)]
@@ -383,7 +383,7 @@ rel_error_array = np.zeros(len(sample_no_list))
 for i, sample_no in enumerate(sample_no_list):
     run = wandb.init(
         # set the wandb project where this run will be logged
-        project="Banana - SI hyperparams - multiple conditioning values - small network size",
+        project="Banana - SI hyperparams - multiple conditioning values - big network size",
         name=f"iter={i}_n={sample_no}",
         group="sweep",
         reinit=True,

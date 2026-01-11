@@ -1,6 +1,6 @@
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 from tqdm.auto import tqdm
@@ -12,7 +12,7 @@ from jax import grad, vmap, random
 import optax
 from seaborn import kdeplot
 import wandb
-from ot.sliced import sliced_wasserstein_distance as swd
+from ot.lp import wasserstein_1d
 import argparse
 
 from triangular_transport.flows.flow_trainer import (
@@ -75,7 +75,7 @@ args = parser.parse_args()
 RANK = args.run_id
 
 run = wandb.init(
-    project="2D Convergence - Banana - transport v mcmc - fix",
+    project="2D Convergence - Banana - transport v mcmc",
     name=f"run={RANK}-ode-converge",
 )
 
@@ -92,20 +92,18 @@ rng = np.random.RandomState(seed)
 # base_data = inf_train_gen(data="banana", rng=rng, batch_size=nsamples)
 # us_base = base_data[:, 1:2]
 samps = np.load("rej_samples_1.npy")[
-    np.random.choice(100000, size=(nsamples,)), :
+    rng.choice(100000, size=(nsamples,)), :
 ]
 swd_mcmc = np.load("swd_array_mcmc.npy")
 mmd_mcmc = np.load("mmd_array_mcmc.npy")
 ksd_mcmc = np.load("ksd_array_mcmc.npy")
 us_base = rng.randn(nsamples, 1)
-print("About to calculate swd...")
-base_swd = swd(
+print("About to calculate wd...")
+base_wd = wasserstein_1d(
     us_base,
     samps,
-    n_projections=n_projections,
-    seed=seed,
 )
-print(f"This is the base swd: {base_swd}")
+print(f"This is the base wd: {base_wd}")
 gamma = median_heuristic_sigma_jax(us_base, samps)
 k1 = get_gaussianRBF(gamma)
 k2 = get_gaussianRBF(gamma - 6.0)
@@ -169,12 +167,12 @@ sample_no_list.append(100000)
 # sample_no_list = [30000, 40000]
 loss_iter = 1
 # hidden_layer_list = [[256] * 2, [256] * 3, [256] * 4, [512] * 3, [512] * 4, [512] * 6, [1024] * 8]
-swd_array = np.zeros(len(sample_no_list))
+wd_array = np.zeros(len(sample_no_list))
 mmd_array = np.zeros(len(sample_no_list))
 ksd_array = np.zeros(len(sample_no_list))
 epochs = 8000
 for i, sample_no in tqdm(enumerate(sample_no_list)):
-    key = random.PRNGKey(i + 1)
+    key = random.PRNGKey(i + 1 + RANK)
     key, key1, key2, key3, key4 = random.split(key, 5)
     key, subkey1 = random.split(key, 2)
     train_dim = sample_no
@@ -183,14 +181,14 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     batch_size -= 1
     steps_per_epoch = int(np.ceil(train_dim / batch_size))
     steps = steps_per_epoch * epochs
-    print_every = 5000
+    print_every = 10000
     yu_dimension = (1, 1)
     target_data = inf_train_gen(data="banana", rng=rng, batch_size=train_dim)
     dim = yu_dimension[0] + yu_dimension[1]
     # hidden_layer_list = [256] * 4 if train_dim < 8000 else [1024] * 8
     # hidden_layer_list = [512] * 6
-    hidden_layer_list = [256] * 3
-    # hidden_layer_list = [1024] * 8
+    # hidden_layer_list = [256] * 3
+    hidden_layer_list = [1024] * 8
     model = MLP(
         key=key1,
         dim=dim,
@@ -210,8 +208,8 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         optax.clip_by_global_norm(1.0), optax.adamw(schedule)
     )
 
-    interpolant = linear_interpolant
-    interpolant_der = linear_interpolant_der
+    interpolant = trig_interpolant
+    interpolant_der = trig_interpolant_der
     interpolant_args = {"t": None, "x1": None, "x0": None}
 
     trainer = NNTrainer(
@@ -235,7 +233,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         print_every=print_every,
     )
     print("Calculating MMD and SWD and KSD...")
-    swd_iter_array = np.zeros(loss_iter)
+    wd_iter_array = np.zeros(loss_iter)
     mmd_iter_array = np.zeros(loss_iter)
     ksd_iter_array = np.zeros(loss_iter)
     for j in range(loss_iter):
@@ -247,30 +245,29 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
 
         us_gen = cond_samples[:, 1:2]
         mmd_iter_array[j] = get_kme(us_gen, samps)
-        swd_iter_array[j] = (
-            swd(np.array(us_gen), samps, n_projections=n_projections, seed=seed)
-            / base_swd
+        wd_iter_array[j] = (
+            wasserstein_1d(np.array(us_gen), samps)
+            / base_wd
         )
         ksd_iter_array[j] = compute_ksd_jax(us_gen, score_V, bandwidth=bandwidth) / base_ksd
     mmd_array[i] = np.mean(mmd_iter_array)
-    swd_array[i] = np.mean(swd_iter_array)
+    wd_array[i] = np.mean(wd_iter_array)
     ksd_array[i] = np.mean(ksd_iter_array)
-    print(f"This is the variance for the SWD: {np.var(swd_iter_array)}")
+    print(f"This is the variance for the SWD: {np.var(wd_iter_array)}")
     wandb.log(
         {
-            "relative error (swd)": swd_array[i],
-            "relative error (swd) - mcmc": swd_mcmc[i] / base_swd,
+            "relative error (swd)": wd_array[i]
         },
         step=sample_no,
     )
     # wandb.log({"relative error (swd) - mcmc": swd_mcmc[i]}, step=sample_no)
-    wandb.log({"relative error (mmd)": mmd_array[i], "relative error (mmd) - mcmc": mmd_mcmc[i]}, step=sample_no)
-    wandb.log({"relative error (ksd)": ksd_array[i], "relative error (ksd) - mcmc": ksd_mcmc[i] / base_ksd}, step=sample_no)
+    wandb.log({"relative error (mmd)": mmd_array[i]}, step=sample_no)
+    wandb.log({"relative error (ksd)": ksd_array[i]}, step=sample_no)
     print(f"This is the relative MMD error: {mmd_array[i]}")
-    print(f"This is the relative SWD error: {swd_array[i]}")
+    print(f"This is the relative SWD error: {wd_array[i]}")
     print(f"This is the relative KSD error: {ksd_array[i]}")
 
 print("Successfully trained all models and now saving results!")
-np.save(os.path.join(output_dir, "nn_conv_mmd.npy"), mmd_array)
-np.save(os.path.join(output_dir, "nn_conv_swd.npy"), swd_array)
-np.save(os.path.join(output_dir, "nn_conv_ksd.npy"), ksd_array)
+np.save(os.path.join(output_dir, f"nn_conv_mmd_{RANK}.npy"), mmd_array)
+np.save(os.path.join(output_dir, f"nn_conv_wd_{RANK}.npy"), wd_array)
+np.save(os.path.join(output_dir, f"nn_conv_ksd_{RANK}.npy"), ksd_array)
