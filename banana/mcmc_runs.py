@@ -62,11 +62,19 @@ for i, chain_length in enumerate(tqdm(chain_list)):
             burn_in=burn_in,
         )
         adapt_mcmc.fit(print_every=20000)
-        mcmc_samps[:, k] = adapt_mcmc.samples
+        mcmc_samps[:, k] = (adapt_mcmc.samples).reshape(-1)
     
     output_path = os.path.join(output_dir, f"mcmc_samps_{chain_length}_{num_cond_vars}.npy")
     np.save(output_path, mcmc_samps)
+    print("Saved successfully!")
         
 
 
 elapsed = time.perf_counter() - start
+timings = {
+    "mcmc_time": elapsed,
+    "timestamp": time.time(),
+}
+
+with open(os.path.join(output_dir, "timings.json"), "w") as f:
+    json.dump(timings, f, indent=2)
