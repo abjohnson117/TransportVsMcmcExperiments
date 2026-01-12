@@ -1,6 +1,6 @@
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 from tqdm.auto import tqdm
@@ -71,7 +71,7 @@ model = MLP(
 schedule = optax.warmup_cosine_decay_schedule(
     init_value=0.0,
     peak_value=1e-3,
-    warmup_steps=2_000,
+    warmup_steps=2000,
     decay_steps=steps,
     end_value=1e-5,
 )
@@ -111,13 +111,18 @@ start_sample = time.perf_counter()
 for i, n_gen_samples in enumerate(tqdm(gen_sample_list)):
     num_cond_vars = conditioning_list[i]
     cond_vars = conditioning_ys[rng.choice(budget, size=num_cond_vars, replace=False)]
-    cond_vars = list(cond_vars)
+    cond_vars = cond_vars.tolist()
     cond_samples = velocity.conditional_sample(
         cond_values=cond_vars,
         nsamples=n_gen_samples,
         u0_cond=None,
     )
-    cond_samples = jnp.hstack(cond_samples)
+    cond_sample_list = [cond_sample[:, yu_dimension[0]:] for cond_sample in cond_samples]
+    if num_cond_vars > 1:
+        cond_samples = jnp.hstack(cond_sample_list)
+    else:
+        cond_samples = cond_sample_list[0]
+    print(f"This is the shape of cond_samples: {cond_samples.shape}")
     output_path = os.path.join(output_dir, f"nn_samps_{n_gen_samples}_{num_cond_vars}.npy")
     np.save(output_path, cond_samples)
     output_path_cond_vars = os.path.join(output_dir, f"cond_vars_{num_cond_vars}.npy")
