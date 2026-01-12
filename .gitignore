@@ -196,6 +196,8 @@ p-poisson/*.npy
 p-poisson/*.pkl
 p-poisson/*.h5
 p-poisson/*.xdmf
+banana/mcmc_results
+banana/rej_results
 poisson-broken
 # wandb
 # hippylib

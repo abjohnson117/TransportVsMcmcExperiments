@@ -40,7 +40,7 @@ def alpha(x, w, log_density):
 start = time.perf_counter()
 for i, chain_length in enumerate(tqdm(chain_list)):
     num_cond_vars = conditioning_list[i]
-    cond_vars = conditioning_ys[np.random.choice(budget, (num_cond_vars, ))]
+    cond_vars = conditioning_ys[rng.choice(budget, size=num_cond_vars, replace=False)]
     mcmc_samps = np.zeros((chain_length, num_cond_vars))
     for k, cond_no in enumerate(cond_vars):
         @jit
@@ -52,7 +52,7 @@ for i, chain_length in enumerate(tqdm(chain_list)):
         adapt_mcmc = AdaptiveMCMC(
             target_density=density_V,
             alpha_function=alpha,
-            seed=k,
+            seed=np.random.choice(1000000),
             train_dim=1,
             steps=chain_length,
             name="Adaptive - Conditional",
@@ -66,6 +66,8 @@ for i, chain_length in enumerate(tqdm(chain_list)):
     
     output_path = os.path.join(output_dir, f"mcmc_samps_{chain_length}_{num_cond_vars}.npy")
     np.save(output_path, mcmc_samps)
+    output_path_cond_vars = os.path.join(output_dir, f"cond_vars_{num_cond_vars}.npy")
+    np.save(output_path_cond_vars, cond_vars)
     print("Saved successfully!")
         
 
