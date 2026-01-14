@@ -24,7 +24,7 @@ budget = 4 ** 8
 burn_in = 1
 seed = 1
 rng = np.random.RandomState(seed)
-conditioning_ys = rng.uniform(low=-6, high=1.75, size=(budget, ))
+conditioning_ys = rng.uniform(low=-5, high=1.05, size=(budget, ))
 conditioning_list = [4 ** i for i in range(9)]
 chain_list = list(reversed(conditioning_list))
 
