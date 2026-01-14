@@ -56,7 +56,7 @@ b = 0.1
 sigma_x = 1
 seed = 1
 rng = np.random.RandomState(seed)
-conditioning_ys = rng.uniform(low=-6, high=1.75, size=(budget, ))
+conditioning_ys = rng.uniform(low=-5, high=1.05, size=(budget, ))
 
 rej_samps = np.zeros((budget, nsamples))
 

@@ -36,8 +36,17 @@ for i, cond_num in enumerate(tqdm(conditioning_list)):
     nn_samps = np.load(f"nn_results/ode/nn_samps_{nsamples}_{cond_num}.npy")
     mcmc_samps = np.load(f"mcmc_results/mcmc_samps_{nsamples}_{cond_num}.npy")
     lookup = {v: i for i, v in enumerate(conditioning_ys)}
+    print(lookup)
     idxs = np.array([lookup[v] for v in cond_vars])
     rej_samps = rej_samples[idxs, :].T
+
+    bad_cols = np.where(np.isnan(nn_samps).any(axis=0))[0]
+    keep_cols = np.setdiff1d(np.arange(nn_samps.shape[1]), bad_cols)
+    nn_samps = nn_samps[:, keep_cols]
+    mcmc_samps = mcmc_samps[:, keep_cols]
+    rej_samps = rej_samps[:, keep_cols]
+    cond_vars = cond_vars[keep_cols]
+    cond_num = cond_vars.shape[0]
 
     nn_array = np.zeros(cond_num)
     mcmc_array = np.zeros(cond_num)

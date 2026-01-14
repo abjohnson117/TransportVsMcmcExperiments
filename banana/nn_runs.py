@@ -40,7 +40,7 @@ n_train_samps = budget # TODO: Can change this. But the idea of these plots is t
 epochs = 6500
 seed = 1
 rng = np.random.RandomState(seed)
-conditioning_ys = rng.uniform(low=-6, high=1.75, size=(budget, ))
+conditioning_ys = rng.uniform(low=-5, high=1.05, size=(budget, ))
 conditioning_list = [4 ** i for i in range(9)]
 gen_sample_list = list(reversed(conditioning_list))
 
@@ -108,28 +108,40 @@ elapsed_train = time.perf_counter() - start_train
 
 # Start conditioning
 start_sample = time.perf_counter()
-for i, n_gen_samples in enumerate(tqdm(gen_sample_list)):
-    num_cond_vars = conditioning_list[i]
-    cond_vars = conditioning_ys[rng.choice(budget, size=num_cond_vars, replace=False)]
-    cond_vars = cond_vars.tolist()
+nsamples = 20000
+nn_samps = np.zeros((budget, nsamples))
+# for i, n_gen_samples in enumerate(tqdm(gen_sample_list)):
+#     num_cond_vars = conditioning_list[i]
+#     cond_vars = conditioning_ys[rng.choice(budget, size=num_cond_vars, replace=False)]
+#     cond_vars = cond_vars.tolist()
+#     cond_samples = velocity.conditional_sample(
+#         cond_values=cond_vars,
+#         nsamples=n_gen_samples,
+#         u0_cond=None,
+#     )
+#     cond_sample_list = [cond_sample[:, yu_dimension[0]:] for cond_sample in cond_samples]
+#     if num_cond_vars > 1:
+#         cond_samples = jnp.hstack(cond_sample_list)
+#     else:
+#         cond_samples = cond_sample_list[0]
+#     print(f"This is the shape of cond_samples: {cond_samples.shape}")
+#     output_path = os.path.join(output_dir, f"nn_samps_{n_gen_samples}_{num_cond_vars}.npy")
+#     np.save(output_path, cond_samples)
+#     output_path_cond_vars = os.path.join(output_dir, f"cond_vars_{num_cond_vars}.npy")
+#     np.save(output_path_cond_vars, cond_vars)
+#     print("Saved successfully!")
+for i, y in enumerate(tqdm(conditioning_ys)):
+    cond_var = y.item()
     cond_samples = velocity.conditional_sample(
-        cond_values=cond_vars,
-        nsamples=n_gen_samples,
+        cond_values=cond_var,
+        nsamples=nsamples,
         u0_cond=None,
     )
-    cond_sample_list = [cond_sample[:, yu_dimension[0]:] for cond_sample in cond_samples]
-    if num_cond_vars > 1:
-        cond_samples = jnp.hstack(cond_sample_list)
-    else:
-        cond_samples = cond_sample_list[0]
-    print(f"This is the shape of cond_samples: {cond_samples.shape}")
-    output_path = os.path.join(output_dir, f"nn_samps_{n_gen_samples}_{num_cond_vars}.npy")
-    np.save(output_path, cond_samples)
-    output_path_cond_vars = os.path.join(output_dir, f"cond_vars_{num_cond_vars}.npy")
-    np.save(output_path_cond_vars, cond_vars)
-    print("Saved successfully!")
-
+    cond_samples = cond_samples[:, yu_dimension[0]]
+    nn_samps[i, :] = cond_samples
 elapsed_sample = time.perf_counter() - start_sample
+
+np.save(os.path.join(output_dir, "nn_samps.npy"), nn_samps)
 timings = {
     "nn_time_ode": elapsed_train,
     "sample_ode_time": elapsed_sample,
@@ -137,3 +149,4 @@ timings = {
 }
 with open(os.path.join(output_dir, "timings.json"), "w") as f:
     json.dump(timings, f, indent=2)
+print("Saved successfully!")
