@@ -1,6 +1,6 @@
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 from tqdm.auto import tqdm
@@ -12,6 +12,7 @@ from jax import grad, vmap, random
 import optax
 import time
 import json
+import argparse
 
 from triangular_transport.flows.flow_trainer import (
     NNTrainer,
@@ -28,19 +29,25 @@ from triangular_transport.flows.dataloaders import (
     standard_gaussian_reference_sampler,
 )
 
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--run_id", type=int, default=0, help="Run index or ID for output folder"
+)
+args = parser.parse_args()
+
 plt.style.use("ggplot")
 
-output_root = "nn_results_no_loop"
-output_dir = os.path.join(output_root, "ode")
+output_root = "nn_results"
+output_dir = os.path.join(output_root, f"ode_{args.run_id}")
 os.makedirs(output_root, exist_ok=True)
 os.makedirs(output_dir, exist_ok=True)
 
 budget = 4 ** 8
 n_train_samps = budget # TODO: Can change this. But the idea of these plots is to use the max budget. NN evals don't require any more forward evals, so we can max out the budget here.
 epochs = 6500
-seed = 1
+seed = args.run_id
 rng = np.random.RandomState(seed)
-conditioning_ys = rng.uniform(low=-5, high=1.05, size=(budget, ))
+conditioning_ys = rng.uniform(low=-5, high=0.4, size=(budget, ))
 conditioning_list = [4 ** i for i in range(9)]
 gen_sample_list = list(reversed(conditioning_list))
 
@@ -108,37 +115,8 @@ elapsed_train = time.perf_counter() - start_train
 
 # Start conditioning
 start_sample = time.perf_counter()
-nsamples = 1100
+nsamples = 1500
 nn_samps = np.zeros((budget, nsamples))
-# for i, n_gen_samples in enumerate(tqdm(gen_sample_list)):
-#     num_cond_vars = conditioning_list[i]
-#     cond_vars = conditioning_ys[rng.choice(budget, size=num_cond_vars, replace=False)]
-#     cond_vars = cond_vars.tolist()
-#     cond_samples = velocity.conditional_sample(
-#         cond_values=cond_vars,
-#         nsamples=n_gen_samples,
-#         u0_cond=None,
-#     )
-#     cond_sample_list = [cond_sample[:, yu_dimension[0]:] for cond_sample in cond_samples]
-#     if num_cond_vars > 1:
-#         cond_samples = jnp.hstack(cond_sample_list)
-#     else:
-#         cond_samples = cond_sample_list[0]
-#     print(f"This is the shape of cond_samples: {cond_samples.shape}")
-#     output_path = os.path.join(output_dir, f"nn_samps_{n_gen_samples}_{num_cond_vars}.npy")
-#     np.save(output_path, cond_samples)
-#     output_path_cond_vars = os.path.join(output_dir, f"cond_vars_{num_cond_vars}.npy")
-#     np.save(output_path_cond_vars, cond_vars)
-#     print("Saved successfully!")
-# for i, y in enumerate(tqdm(conditioning_ys)):
-#     cond_var = y.item()
-#     cond_samples = velocity.conditional_sample(
-#         cond_values=cond_var,
-#         nsamples=nsamples,
-#         u0_cond=None,
-#     )
-#     cond_samples = cond_samples[:, yu_dimension[0]]
-#     nn_samps[i, :] = cond_samples
 cond_vars = conditioning_ys.tolist()
 print("About to start drawing samples...")
 cond_samples = velocity.conditional_sample(

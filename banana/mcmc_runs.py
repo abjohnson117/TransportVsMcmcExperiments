@@ -14,17 +14,24 @@ from ot.sliced import sliced_wasserstein_distance as swd
 from tqdm.auto import tqdm
 import json
 import time
+import argparse
 
 from triangular_transport.mcmc.adaptive_mcmc import AdaptiveMCMC
 
-output_dir = "mcmc_results"
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--run_id", type=int, default=0, help="Run index or ID for output folder"
+)
+args = parser.parse_args()
+
+output_dir = f"mcmc_results_{args.run_id}"
 os.makedirs(output_dir, exist_ok=True)
 
 budget = 4 ** 8
 burn_in = 1
-seed = 1
+seed = args.run_id
 rng = np.random.RandomState(seed)
-conditioning_ys = rng.uniform(low=-5, high=1.05, size=(budget, ))
+conditioning_ys = rng.uniform(low=-5, high=0.4, size=(budget, ))
 conditioning_list = [4 ** i for i in range(9)]
 chain_list = list(reversed(conditioning_list))
 

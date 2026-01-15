@@ -13,6 +13,13 @@ import numpy as np
 from ot.sliced import sliced_wasserstein_distance as swd
 from tqdm.auto import tqdm
 from scipy.optimize import minimize_scalar
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--run_id", type=int, default=0, help="Run index or ID for output folder"
+)
+args = parser.parse_args()
 
 def rejection_sample(n, M, tau=5.0, bounds=(-50, 50), batch=4096, seed=0):
     rng = np.random.default_rng(seed)
@@ -45,18 +52,19 @@ def rejection_sample(n, M, tau=5.0, bounds=(-50, 50), batch=4096, seed=0):
 
     return samples, accept_rate
 
-output_dir = "rej_results"
+output_root = "rej_results"
+output_dir = os.path.join(output_root, f"_{args.run_id}")
 os.makedirs(output_dir, exist_ok=True)
 
 budget = 4 ** 8
-nsamples = 20000
+nsamples = 1500
 tau = 5.0
 a = 2
 b = 0.1
 sigma_x = 1
-seed = 1
+seed = args.run_id
 rng = np.random.RandomState(seed)
-conditioning_ys = rng.uniform(low=-5, high=1.05, size=(budget, ))
+conditioning_ys = rng.uniform(low=-5, high=0.4, size=(budget, ))
 
 rej_samps = np.zeros((budget, nsamples))
 

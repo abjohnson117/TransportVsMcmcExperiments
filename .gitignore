@@ -199,6 +199,8 @@ p-poisson/*.xdmf
 banana/mcmc_results
 banana/rej_results
 banana/nn_results
+banana/mcmc_results*
+banana/logs
 poisson-broken
 # wandb
 # hippylib
