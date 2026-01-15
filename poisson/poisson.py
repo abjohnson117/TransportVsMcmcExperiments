@@ -34,6 +34,7 @@ import h5py
 import numpy as np
 import matplotlib.pyplot as plt
 import pickle
+import json
 
 
 import dolfin as dl
@@ -41,11 +42,39 @@ import hippylib as hp
 import muq.Modeling as mm
 import muq.SamplingAlgorithms as ms
 import hippylib2muq as hm
+import argparse
 
-RANK = int(os.environ.get("OMPI_COMM_WORLD_RANK", os.environ.get("PMI_RANK", 0))) + 30
-SIZE = int(os.environ.get("OMPI_COMM_WORLD_SIZE", os.environ.get("PMI_SIZE", 1)))
+MPI_RANK = int(os.environ.get("OMPI_COMM_WORLD_RANK", os.environ.get("PMI_RANK", 0)))
+MPI_SIZE = int(os.environ.get("OMPI_COMM_WORLD_SIZE", os.environ.get("PMI_SIZE", 1)))
 
-print("this is the newest update")
+parser = argparse.ArgumentParser(description=f"Run MCMC chain")
+parser.add_argument(
+    "--data_path",
+    type=str,
+    required=False,
+    default=None,
+    help="Path to .npy data file (misfit)"
+)
+
+parser.add_argument(
+    "--output_root",
+    type=str,
+    required=False,
+    default=None,
+    help="Output root for generated MCMC samps"
+)
+
+parser.add_argument(
+    "--start_idx",
+    type=int,
+    required=False,
+    default=0,
+    help="Global chain index offset for this mpirun batch"
+)
+args = parser.parse_args()
+RANK = args.start_idx + MPI_RANK
+SIZE = MPI_SIZE
+
 
 def get_data(arg, vec, mesh):
     # sqrt_dim = int(np.sqrt(arg.dim()))
@@ -206,10 +235,11 @@ if __name__ == "__main__":
     with open("poisson.yaml") as fid:
         inargs = yaml.full_load(fid)
 
+    print("Got to main")
     sep = "\n" + "#" * 80 + "\n"
-    output_root = "training_dataset"
-    # output_dir = os.path.join(output_root, f"chain_{RANK:02d}")
-    output_dir = os.path.join(output_root, f"chain_{RANK:02d}")
+    output_root = args.output_root
+    output_dir = os.path.join(output_root, f"chain_{RANK:03d}")
+    print(f"This is output_dir: {output_dir}")
     os.makedirs(output_dir, exist_ok=True)
     #
     # Set up the mesh and finite element function spaces
@@ -252,7 +282,9 @@ if __name__ == "__main__":
     # delta = 9.0
     # delta = 1.0 # This was 9.0
     delta = 9.0
-    anis_diff = dl.Identity(2) #TODO: Try to get rid of anis_diff here and see if it makes any difference.
+    anis_diff = dl.Identity(
+        2
+    )  # TODO: Try to get rid of anis_diff here and see if it makes any difference.
 
     prior = hp.BiLaplacianPrior(
         Vh[hp.PARAMETER], gamma, delta, anis_diff, robin_bc=True
@@ -273,7 +305,13 @@ if __name__ == "__main__":
     print("Number of observation points: {0}".format(ntargets))
 
     if inargs["have_data"]:
-        targets, data = data_file("r")
+        targets, _ = data_file("r")
+        if inargs["data_from_npy"]:
+            print("Getting data from ys dataset")
+            ys = (np.load(args.data_path))[:50000]
+            data = ys[RANK]
+        else:
+            _, data = data_file("r")
         misfit = hp.PointwiseStateObservation(Vh[hp.STATE], targets)
         misfit.d.set_local(data)
 
@@ -378,6 +416,18 @@ if __name__ == "__main__":
     print("Termination reason:  ", solver.termination_reasons[solver.reason])
     print("Final gradient norm: ", solver.final_grad_norm)
     print("Final cost:          ", solver.final_cost)
+
+    solver_results = {
+        "iterations": int(solver.it),
+        "converged": bool(solver.converged),
+        "termination_reason": solver.termination_reasons[solver.reason],
+        "final_grad_norm": float(solver.final_grad_norm),
+        "final_cost": float(solver.final_cost),
+    }
+
+    json_path = os.path.join(output_dir, "solver_stats.json")
+    with open(json_path, "w") as ff:
+        json.dump(solver_results, ff, indent=4)
 
     #
     #  Set up ModPieces for implementing MCMC methods
@@ -525,7 +575,7 @@ if __name__ == "__main__":
         vertex_samples[i] = f.compute_vertex_values(mesh)
 
     np.save(
-        os.path.join(output_dir, "hmala_samples_grid.npy"),
+        os.path.join(output_dir, "hmala_samples.npy"),
         vertex_samples,
     )
 
@@ -533,5 +583,5 @@ if __name__ == "__main__":
     save_list["hMALA"]["Sampler"] = None
     save_list["hMALA"]["Samples"] = vertex_samples
 
-    with open(os.path.join(output_dir, "method-list-hmala-grid.pkl"), "wb") as f:
+    with open(os.path.join(output_dir, "method-list-hmala.pkl"), "wb") as f:
         pickle.dump(method_list, f)

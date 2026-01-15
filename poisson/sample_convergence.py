@@ -4,6 +4,9 @@ import yaml
 from pathlib import Path
 from typing import Callable, List
 
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 import jax
 import jax.numpy as jnp
@@ -15,8 +18,6 @@ from typing import Callable
 import pickle
 import equinox as eqx
 from ot.sliced import sliced_wasserstein_distance as swd
-
-import os
 
 from triangular_transport.flows.flow_trainer import (
     NNTrainer,
@@ -32,7 +33,8 @@ from triangular_transport.flows.interpolants import (
 )
 from triangular_transport.flows.loss_functions import vec_field_loss
 from triangular_transport.flows.methods.utils import UnitGaussianNormalizer
-from triangular_transport.networks import MLP
+
+# from triangular_transport.networks.flow_networks import MLP
 from triangular_transport.flows.dataloaders import gaussian_reference_sampler
 from triangular_transport.kernels.kernel_tools import (
     get_gaussianRBF,
@@ -48,89 +50,104 @@ import wandb
 
 # plt.style.use("ggplot")
 
-# class MLP(eqx.Module):
-#     layers: List[eqx.nn.Linear]         # main hidden layers
-#     skips:  List[eqx.nn.Linear | None]  # projections for residuals (or None for identity)
-#     out:    eqx.nn.Linear
-#     activation_fn: List[Callable]
+# jax.config.update("jax_default_device", jax.devices()[2])
 
-#     def __init__(
-#         self,
-#         key: jax.random.PRNGKey,
-#         dim: int,
-#         out_dim: int | None = None,
-#         num_layers: int = 4,
-#         activation_fn: List[Callable] | Callable = jax.nn.gelu,
-#         w: int | List[int] = 64,
-#         time_varying: bool = False,
-#     ):
-#         if out_dim is None:
-#             out_dim = dim
+parser = argparse.ArgumentParser()
+parser.add_argument("--run_id", type=int, default=0, help="Run index or ID for output folder")
+parser.add_argument(
+    "--data_path",
+    type=str,
+    required=False,
+    default=None,
+    help="Path to .npy data file (misfit)"
+)
+parser.add_argument(
+    "--hmala_path",
+    type=str,
+    required=False,
+    default=None,
+    help="Path to .npy mcmc samps"
+)
+args = parser.parse_args()
 
-#         # normalize activation list
-#         if isinstance(activation_fn, list):
-#             if len(activation_fn) == 1:
-#                 activation_fn *= num_layers - 1
-#         else:
-#             activation_fn = [activation_fn] * (num_layers - 1)
-#         self.activation_fn = activation_fn
+RANK = args.run_id
 
-#         # normalize widths
-#         if isinstance(w, list):
-#             if len(w) == 1:
-#                 w *= (num_layers - 1)
-#             widths = w
-#         else:
-#             widths = [w] * (num_layers - 1)
 
-#         k = jax.random.split(key, 2 * num_layers)  # enough keys
+class MLP(eqx.Module):
+    layers: List[eqx.nn.Linear]  # main hidden layers
+    skips: List[
+        eqx.nn.Linear | None
+    ]  # projections for residuals (or None for identity)
+    out: eqx.nn.Linear
+    activation_fn: List[Callable]
 
-#         in_dim0 = dim + (1 if time_varying else 0)
+    def __init__(
+        self,
+        key: jax.random.PRNGKey,
+        dim: int,
+        out_dim: int | None = None,
+        num_layers: int = 4,
+        activation_fn: List[Callable] | Callable = jax.nn.gelu,
+        w: int | List[int] = 64,
+        time_varying: bool = False,
+    ):
+        if out_dim is None:
+            out_dim = dim
 
-#         # build hidden layers + skip projections
-#         self.layers = []
-#         self.skips  = []
-#         in_dim = in_dim0
-#         for i, width in enumerate(widths):
-#             self.layers.append(eqx.nn.Linear(in_dim, width, key=k[i]))
-#             # projection: identity if dims match, else linear map
-#             if in_dim == width:
-#                 self.skips.append(None)  # treat as identity in __call__
-#             else:
-#                 self.skips.append(eqx.nn.Linear(in_dim, width, key=k[i + num_layers]))
-#             in_dim = width
+        # normalize activation list
+        if isinstance(activation_fn, list):
+            if len(activation_fn) == 1:
+                activation_fn *= num_layers - 1
+        else:
+            activation_fn = [activation_fn] * (num_layers - 1)
+        self.activation_fn = activation_fn
 
-#         # output layer
-#         self.out = eqx.nn.Linear(in_dim, out_dim, key=k[-1])
+        # normalize widths
+        if isinstance(w, list):
+            if len(w) == 1:
+                w *= num_layers - 1
+            widths = w
+        else:
+            widths = [w] * (num_layers - 1)
 
-#     def __call__(self, x):
-#         for layer, skip, act in zip(self.layers, self.skips, self.activation_fn):
-#             h = act(layer(x))
-#             s = x if skip is None else skip(x)
-#             x = h + s                    # projected residual
-#         return self.out(x)
+        k = jax.random.split(key, 2 * num_layers)  # enough keys
 
-# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-jax.config.update("jax_default_device", jax.devices()[1])
+        in_dim0 = dim + (1 if time_varying else 0)
 
-# RANK = int(os.environ.get("OMPI_COMM_WORLD_RANK", os.environ.get("PMI_RANK", 0)))
-RANK = 0
-SIZE = int(os.environ.get("OMPI_COMM_WORLD_SIZE", os.environ.get("PMI_SIZE", 1)))
+        # build hidden layers + skip projections
+        self.layers = []
+        self.skips = []
+        in_dim = in_dim0
+        for i, width in enumerate(widths):
+            self.layers.append(eqx.nn.Linear(in_dim, width, key=k[i]))
+            # projection: identity if dims match, else linear map
+            if in_dim == width:
+                self.skips.append(None)  # treat as identity in __call__
+            else:
+                self.skips.append(eqx.nn.Linear(in_dim, width, key=k[i + num_layers]))
+            in_dim = width
+
+        # output layer
+        self.out = eqx.nn.Linear(in_dim, out_dim, key=k[-1])
+
+    def __call__(self, x):
+        for layer, skip, act in zip(self.layers, self.skips, self.activation_fn):
+            h = act(layer(x))
+            s = x if skip is None else skip(x)
+            x = h + s  # projected residual
+        return self.out(x)
 
 configs = {
     "dataset": "darcy_flow_si_hmala",
-    "hidden_layer": 512,
-    "interpolant": trig_interpolant,
-    "interpolant_der": trig_interpolant_der,
-    "activation_fn": jax.nn.gelu,
 }
 
 run = wandb.init(
     # set the wandb project where this run will be logged
-    project='Poisson - SI v hMALA, no PCA',
-    config=configs
+    project="Poisson - SI v hMALA - big network",
+    config=configs,
+    name=f"run={RANK}_ode_convergence"
 )
+
 
 def read_data_h5(path="data.h5"):
     with h5py.File(path, "r") as f:
@@ -162,12 +179,12 @@ def get_pca_fns(us):
     def pca_decode(z):
         # undo whitening
         return mean_us + (z * S) @ V.T
-    
+
     def sample_extra(n=1):
-        eps = np.random.randn(n, S_res.shape[0])    # ~ N(0, I)
-        coeffs = eps * S_res                        # ~ N(0, diag(S_res^2))
+        eps = np.random.randn(n, S_res.shape[0])  # ~ N(0, I)
+        coeffs = eps * S_res  # ~ N(0, diag(S_res^2))
         return coeffs @ V_res.T
-    
+
     def extra_cov():
         return V_res @ np.diag(S_res**2) @ V_res.T
 
@@ -202,7 +219,7 @@ def gamma_from_sigma_jax(sigma):
 
 
 sep = "\n" + "#" * 80 + "\n"
-output_root = "convergence_results"
+output_root = "convergence_results_pca"
 # output_dir = os.path.join(output_root, f"chain_{RANK:02d}")
 # output_dir = os.path.join(output_root, f"chain_{RANK:02d}")
 # output_dir = os.path.join(output_root, )
@@ -216,17 +233,36 @@ utrue = np.load("training_dataset/true_param_grid.npy")
 ytrue = np.load("training_dataset/true_state_grid.npy")
 map_est = np.load("training_dataset/map_param_grid.npy")
 targets, yobs = read_data_h5()
+if args.data_path == "data_50.npy":
+    yobs = np.load(args.data_path)
+elif args.data_path == "data_98.npy":
+    yobs = np.load(args.data_path)
 
 # Load h-MALA samples
-nsamples = inargs["MCMC"]["nsamples"] - inargs["MCMC"]["burnin"]
+# nsamples = inargs["MCMC"]["nsamples"] - inargs["MCMC"]["burnin"]
+nsamples = 20000
 nx = ny = 33
 flat_length = nx * ny
-hmala_root = "training_dataset"
+if args.hmala_path == "mcmc_median/":
+    hmala_root = args.hmala_path
+    chain_iters = 20
+    hmala_tail = "hmala_samples.npy"
+    reshape_no = 47000
+elif args.hmala_path == "mcmc_98/":
+    hmala_root = args.hmala_path
+    chain_iters = 20
+    hmala_tail = "hmala_samples.npy"
+    reshape_no = 47000
+else:
+    hmala_root = "training_dataset"
+    chain_iters = 40
+    hmala_tail = "hmala_samples_grid.npy"
+    reshape_no = 20000
 chains = []
-for i in tqdm(range(40)):
+for i in tqdm(range(chain_iters)):
     hmala_dir = f"chain_{i:02d}"
-    hmala_path = os.path.join(hmala_root, hmala_dir, "hmala_samples_grid.npy")
-    hmala_samps_chain = np.load(hmala_path).reshape(nsamples, flat_length)
+    hmala_path = os.path.join(hmala_root, hmala_dir, hmala_tail)
+    hmala_samps_chain = np.load(hmala_path).reshape(reshape_no, flat_length)
     thinned_samps = hmala_samps_chain[::40, :]
     chains.append(thinned_samps)
 hmala_samps = np.vstack(
@@ -325,6 +361,9 @@ random_idxs = np.random.choice(len(us_ref_pca), (20000,))
 base_swd = swd(
     us_ref[random_idxs, :], hmala_samps, n_projections=n_projections, seed=seed
 )
+# base_swd = swd(
+#     us_ref_pca[random_idxs, :], hmala_pca, n_projections=n_projections, seed=seed
+# )
 print(f"This is the base swd: {base_swd}")
 
 sample_no_list = [2**i for i in range(1, 15)]
@@ -332,6 +371,19 @@ sample_no_list.append(nsamples)
 sample_no_list.append(30000)
 sample_no_list.append(40000)
 sample_no_list.append(train_dim)
+hidden_layer_list = [2] * 6
+hidden_layer_list += [4] * 9
+hidden_layer_list += [8] * 2
+hidden_layer_list += [14] * 2
+width_list = [256] * 6
+width_list += [512] * 9
+width_list += [1024] * 2
+width_list += [2048] * 2
+steps_list = [10000] * 12
+steps_list += [750000] * 3
+steps_list += [150000] * 2
+steps_list += [300000] * 2
+
 # sample_no_list = [2, 8, 20000, train_dim]
 
 mmd_array = np.zeros(len(sample_no_list))
@@ -356,40 +408,81 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     print(
         f"This is the size of target and ref data: {target_data.shape} and {ref_data.shape}"
     )
+    with open(f"hyperparam_results/iteration_{i}/best_hyperparams.pkl", "rb") as f:
+        hyperparams = pickle.load(f)
 
     key = random.PRNGKey(seed=np.random.choice(1000))
     key1, key2 = random.split(key=key, num=2)
-    if sample_no < 128:
-        batch_size = sample_no
-    else:
-        batch_size = 128
+    # if sample_no < 128:
+    #     batch_size = sample_no
+    # else:
+    #     batch_size = configs["batch_size"]
+    batch_size = hyperparams["batch_size"]
+    batch_size = 1000
     # steps = 50000
-    steps = 50000
-    print_every = 5000
+    # steps = 100000
+    steps = steps_list[i]
+    print_every = 10000
     yu_dimension = (100, k.item())
     dim = yu_dimension[0] + yu_dimension[1]
-    hidden_layer_list = [configs["hidden_layer"]] * 4
+    hidden_layer_list = [hyperparams["hidden_layer"]] * hyperparams["num_hidden_layers"]
+    if hyperparams["activation"] == "gelu":
+        activation = jax.nn.gelu
+    elif hyperparams["activation"] == "silu":
+        activation = jax.nn.silu
+    elif hyperparams["activation"] == "celu":
+        activation = jax.nn.celu
+    elif hyperparams["activation"] == "selu":
+        activation = jax.nn.selu
+    hidden_layer_list_loop = hidden_layer_list[i] * [width_list[i]]
     model = MLP(
         key=key2,
         dim=dim,
         time_varying=True,
-        w=hidden_layer_list,
-        num_layers=len(hidden_layer_list) + 1,
-        activation_fn=configs["activation_fn"],  # GeLU worked well
+        w=hidden_layer_list_loop,
+        num_layers=len(hidden_layer_list_loop) + 1,
+        # activation_fn=activation,  # GeLU worked well
+        activation_fn=jax.nn.gelu,
     )
     schedule = optax.warmup_cosine_decay_schedule(
         init_value=0.0,
+        # peak_value=hyperparams["peak_value"],
         peak_value=3e-4,
         warmup_steps=2_000,
         decay_steps=steps,
         end_value=1e-5,
     )
     # lr = 1e-4
-    optimizer = optax.adamw(schedule)
+    # optimizer = optax.adamw(schedule)
     # optimizer = optax.adamw(lr)
+    if hyperparams["optimizer"] == "adamw":
+        opt = optax.adamw
+    elif hyperparams["optimizer"] == "adam":
+        opt = optax.adam
+    elif hyperparams["optimizer"] == "adagrad":
+        opt = optax.adagrad
+    elif hyperparams["optimizer"] == "adamaxw":
+        opt = optax.adagrad
+
     optimizer = optax.chain(optax.clip_by_global_norm(1.0), optax.adamw(schedule))
-    interpolant = configs["interpolant"]
-    interpolant_der = configs["interpolant_der"]
+    # interpolant = configs["interpolant"]
+    # interpolant_der = configs["interpolant_der"]
+    if hyperparams["interpolant"] == "linear_interpolant":
+        interpolant = linear_interpolant
+    elif hyperparams["interpolant"] == "trig_interpolant":
+        interpolant = trig_interpolant
+    elif hyperparams["interpolant"] == "sigmoid_interpolant":
+        interpolant = sigmoid_interpolant
+
+    if hyperparams["interpolant_der"] == "linear_interpolant_der":
+        interpolant_der = linear_interpolant_der
+    elif hyperparams["interpolant_der"] == "trig_interpolant_der":
+        interpolant_der = trig_interpolant_der
+    elif hyperparams["interpolant_der"] == "sigmoid_interpolant_der":
+        interpolant_der = sigmoid_interpolant_der
+
+    interpolant = linear_interpolant
+    interpolant_der = linear_interpolant_der
     interpolant_args = {"t": None, "x1": None, "x0": None}
 
     trainer = NNTrainer(
@@ -422,7 +515,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     u_samples_gen = all_samples[:, yu_dimension[0] :]
     u_samples_gen = jnp.asarray(u_samples_gen)
     u_samples = pca_decode(u_samples_gen)
-    # u_samples_pca = pca_encode_total(u_samples) # To make sure in exactly the correct PCA basis
+    u_samples_pca = pca_encode(u_samples) # To make sure in exactly the correct PCA basis
 
     u_samples = u_samples.reshape(nsamples, nx, ny)
     u_samples = jnp.asarray(u_samples)
@@ -439,34 +532,26 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     #     swd(u_samples_gen, hmala_pca, n_projections=n_projections, seed=seed) / base_swd
     # )
     rel_err_array[i] = (
-        swd(u_samples.reshape(nsamples, nx * ny), jnp.asarray(hmala_samps), n_projections=n_projections, seed=seed) / base_swd
+        swd(
+            u_samples.reshape(nsamples, nx * ny),
+            jnp.asarray(hmala_samps),
+            n_projections=n_projections,
+            seed=seed,
+        )
+        / base_swd
     )
-    wandb.log({"relative error (swd)": rel_err_array[i]})
+    wandb.log({"relative error (swd)": rel_err_array[i]}, step=sample_no)
     # ref_indices = np.random.choice(20000)
     # rel_err_array[i] = (MMD(u_samples_gen, us_ref_pca[ref_indices, :]) ** 2) / (MMD(hmala_samps, us_ref_pca[ref_indices, :]) ** 2)
     mmd_array_no_pca[i] = MMD(u_samples.reshape(nsamples, nx * ny), hmala_samps)
     rel_error_no_pca[i] = get_kme(u_samples.reshape(nsamples, nx * ny), hmala_samps)
-    wandb.log({"relative error (mmd)": rel_error_no_pca[i]})
+    wandb.log({"relative error (mmd)": rel_error_no_pca[i]}, step=sample_no)
+    # wandb.log({"relative error (mmd)": mmd_array[i]}, step=sample_no)
     print(f"This is the MMD: {mmd_array[i]}")
     print(f"This is the calculated relative error: {rel_err_array[i]}")
     print(f"This is the MMD (no PCA): {mmd_array_no_pca[i]}")
     print(f"This is the calculated relative error (no PCA): {rel_error_no_pca[i]}")
-    print(
-        f"This is the sliced Wasserstein distance: {swd(u_samples_gen, hmala_pca, n_projections=100)}"
-    )
-    print(
-        f"This is the relative sliced Wasserstein error: {(swd(u_samples_gen, hmala_pca, n_projections=100)) ** 2 / (np.var(hmala_samps)) ** 2}"
-    )
-    print(f"This is the X mean embedding: {mean_emb(u_samples_gen)}")
-    print(f"This is the Y mean embedding: {mean_emb(hmala_pca)}")
-    print(f"This is the XY mean embedding: {xy_mean_emb(u_samples_gen, hmala_pca)}")
-    print(
-        f"These are the kernel values for gen samples: {ker_jit(u_samples_gen, u_samples_gen)}"
-    )
-    print(
-        f"These are the kernel values for hmala samples: {ker_jit(hmala_pca, hmala_pca)}"
-    )
-    np.save(os.path.join(output_dir, f"u_samps_{i}.npy"), u_samples_gen)
+    # np.save(os.path.join(output_dir, f"u_samps_{i}.npy"), u_samples_gen)
 
 print("Successfully trained all models and now saving results!")
 np.save(os.path.join(output_dir, "nn_sample_convergence.npy"), mmd_array)

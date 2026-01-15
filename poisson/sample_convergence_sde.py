@@ -4,6 +4,10 @@ import yaml
 from pathlib import Path
 from typing import Callable, List
 
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = ".40"
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -14,8 +18,6 @@ from typing import Callable
 import pickle
 import equinox as eqx
 from ot.sliced import sliced_wasserstein_distance as swd
-
-import os
 
 from triangular_transport.flows.sde_flow_trainer import NNSDE
 
@@ -38,12 +40,29 @@ import wandb
 # plt.style.use("ggplot")
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-jax.config.update("jax_default_device", jax.devices()[1])
+# os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+# jax.config.update("jax_default_device", jax.devices()[1])
 
 # RANK = int(os.environ.get("OMPI_COMM_WORLD_RANK", os.environ.get("PMI_RANK", 0)))
-RANK = 0
-SIZE = int(os.environ.get("OMPI_COMM_WORLD_SIZE", os.environ.get("PMI_SIZE", 1)))
+parser = argparse.ArgumentParser()
+parser.add_argument("--run_id", type=int, default=0, help="Run index or ID for output folder")
+parser.add_argument(
+    "--data_path",
+    type=str,
+    required=False,
+    default=None,
+    help="Path to .npy data file (misfit)"
+)
+parser.add_argument(
+    "--hmala_path",
+    type=str,
+    required=False,
+    default=None,
+    help="Path to .npy mcmc samps"
+)
+args = parser.parse_args()
+
+RANK = args.run_id
 
 class MLP(eqx.Module):
     layers: List[eqx.nn.Linear]         # main hidden layers
@@ -126,6 +145,39 @@ def linear_interpolant_der(t, x1, x0, z):
     return x1 - x0 + gammadot(t) * z
 
 
+@vmap
+def trig_interpolant(t: jnp.array, x1: jnp.array, x0: jnp.array, z):
+    return (
+        jnp.cos((jnp.pi / 2) * t) * x0
+        + jnp.sin((jnp.pi / 2) * t) * x1
+        + gamma_vmap(t) * z
+    )
+
+
+@vmap
+def trig_interpolant_der(t: jnp.array, x1: jnp.array, x0: jnp.array, z):
+    return (jnp.pi / 2) * (
+        -jnp.sin((jnp.pi / 2) * t) * x0 + jnp.cos((jnp.pi / 2) * t) * x1
+    ) + gammadot(t) * z
+
+
+@vmap
+def sigmoid_interpolant(t: jnp.array, x1: jnp.array, x0: jnp.array, z):
+    return (1 - sigmoid(t)) * x0 + sigmoid(t) * x1 + gamma_vmap(t) * z
+
+
+def sigmoid(t: float) -> float:
+    return jax.nn.sigmoid(10 * (t - 0.5))  # Changed this to 25
+
+
+@vmap
+def sigmoid_interpolant_der(t, x1, x0, z):
+    return sigmoid_dot(t) * (x1 - x0) + gamma_vmap(t) + z
+
+
+sigmoid_dot = vmap(grad(sigmoid))
+
+
 configs = {
     "dataset": "darcy_flow_si_hmala",
     "hidden_layer": 512,
@@ -136,8 +188,9 @@ configs = {
 
 run = wandb.init(
     # set the wandb project where this run will be logged
-    project="Poisson - SI v hMALA, no PCA - SDE",
+    project="Poisson - SI v hMALA - SDE 98",
     config=configs,
+    name=f"run={RANK}_sde_convergence",
 )
 
 def read_data_h5(path="data.h5"):
@@ -210,7 +263,7 @@ def gamma_from_sigma_jax(sigma):
 
 
 sep = "\n" + "#" * 80 + "\n"
-output_root = "convergence_results_sde"
+output_root = "convergence_results_sde_98"
 # output_dir = os.path.join(output_root, f"chain_{RANK:02d}")
 # output_dir = os.path.join(output_root, f"chain_{RANK:02d}")
 # output_dir = os.path.join(output_root, )
@@ -224,17 +277,36 @@ utrue = np.load("training_dataset/true_param_grid.npy")
 ytrue = np.load("training_dataset/true_state_grid.npy")
 map_est = np.load("training_dataset/map_param_grid.npy")
 targets, yobs = read_data_h5()
+if args.data_path == "data_50.npy":
+    yobs = np.load(args.data_path)
+elif args.data_path == "data_98.npy":
+    yobs = np.load(args.data_path)
 
 # Load h-MALA samples
-nsamples = inargs["MCMC"]["nsamples"] - inargs["MCMC"]["burnin"]
+# nsamples = inargs["MCMC"]["nsamples"] - inargs["MCMC"]["burnin"]
+nsamples = 20000
 nx = ny = 33
 flat_length = nx * ny
-hmala_root = "training_dataset"
+if args.hmala_path == "mcmc_median/":
+    hmala_root = args.hmala_path
+    chain_iters = 20
+    hmala_tail = "hmala_samples.npy"
+    reshape_no = 47000
+elif args.hmala_path == "mcmc_98/":
+    hmala_root = args.hmala_path
+    chain_iters = 20
+    hmala_tail = "hmala_samples.npy"
+    reshape_no = 47000
+else:
+    hmala_root = "training_dataset"
+    chain_iters = 40
+    hmala_tail = "hmala_samples_grid.npy"
+    reshape_no = 20000
 chains = []
-for i in tqdm(range(40)):
+for i in tqdm(range(chain_iters)):
     hmala_dir = f"chain_{i:02d}"
-    hmala_path = os.path.join(hmala_root, hmala_dir, "hmala_samples_grid.npy")
-    hmala_samps_chain = np.load(hmala_path).reshape(nsamples, flat_length)
+    hmala_path = os.path.join(hmala_root, hmala_dir, hmala_tail)
+    hmala_samps_chain = np.load(hmala_path).reshape(reshape_no, flat_length)
     thinned_samps = hmala_samps_chain[::40, :]
     chains.append(thinned_samps)
 hmala_samps = np.vstack(
@@ -341,7 +413,7 @@ print(
 # )
 print(f"This is the base swd: {base_swd}")
 
-D_mask = jnp.concatenate([jnp.zeros(ys_normalized.shape[1]), S])
+D_mask = jnp.concatenate([jnp.zeros(ys_normalized.shape[1]), jnp.sqrt(S)])
 
 sample_no_list = [2**i for i in range(1, 15)]
 sample_no_list.append(nsamples)
@@ -373,51 +445,102 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     print(
         f"This is the size of target and ref data: {target_data.shape} and {ref_data.shape}"
     )
+    with open(f"hyperparam_results_sde_mult/iteration_{i}/best_hyperparams.pkl", "rb") as f:
+        hyperparams = pickle.load(f)
 
     key = random.PRNGKey(seed=np.random.choice(1000))
     key1, key2 = random.split(key=key, num=2)
-    if sample_no < 128:
-        batch_size = sample_no
-    else:
-        batch_size = 128
     # steps = 50000
-    steps = 50000
+    steps = 10000
+    batch_size = hyperparams["batch_size"]
     print_every = 5000
     yu_dimension = (100, k.item())
     dim = yu_dimension[0] + yu_dimension[1]
-    hidden_layer_list = [configs["hidden_layer"]] * 4
+    v_hidden_layer_list = [hyperparams["v_hidden_layer"]] * hyperparams["v_num_hidden_layers"]
+    s_hidden_layer_list = [hyperparams["s_hidden_layer"]] * hyperparams["s_num_hidden_layers"]
+
+    if hyperparams["v_activation"] == "gelu":
+        v_activation = jax.nn.gelu
+    elif hyperparams["v_activation"] == "silu":
+        v_activation = jax.nn.silu
+    elif hyperparams["v_activation"] == "celu":
+        v_activation = jax.nn.celu
+    elif hyperparams["v_activation"] == "selu":
+        v_activation = jax.nn.selu
+
+    if hyperparams["s_activation"] == "gelu":
+        s_activation = jax.nn.gelu
+    elif hyperparams["s_activation"] == "silu":
+        s_activation = jax.nn.silu
+    elif hyperparams["s_activation"] == "celu":
+        s_activation = jax.nn.celu
+    elif hyperparams["s_activation"] == "selu":
+        s_activation = jax.nn.selu
+
+
     velocity = MLP(
         key=key2,
         dim=dim,
         time_varying=True,
-        w=hidden_layer_list,
-        num_layers=len(hidden_layer_list) + 1,
-        activation_fn=jax.nn.gelu,  # GeLU worked well
+        w=v_hidden_layer_list,
+        num_layers=len(v_hidden_layer_list) + 1,
+        activation_fn=v_activation,  # GeLU worked well
     )
 
     score = MLP(
         key=key2,
         dim=dim,
         time_varying=True,
-        w=hidden_layer_list,
-        num_layers=len(hidden_layer_list) + 1,
-        activation_fn=jax.nn.gelu,  # GeLU worked well
+        w=s_hidden_layer_list,
+        num_layers=len(s_hidden_layer_list) + 1,
+        activation_fn=s_activation,  # GeLU worked well
     )
-    schedule = optax.warmup_cosine_decay_schedule(
+    v_schedule = optax.warmup_cosine_decay_schedule(
         init_value=0.0,
-        peak_value=3e-4,
+        peak_value=hyperparams["v_peak_value"],
         warmup_steps=2_000,
         decay_steps=steps,
         end_value=1e-5,
     )
-    # lr = 1e-4
-    # optimizer = optax.adamw(schedule)
-    # # optimizer = optax.adamw(lr)
-    # optimizer = optax.chain(optax.clip_by_global_norm(1.0), optax.adamw(schedule))
-    v_optimizer = optax.chain(optax.clip_by_global_norm(1.0), optax.adamw(schedule))
-    s_optimizer = optax.chain(optax.clip_by_global_norm(1.0), optax.adamw(schedule))
-    interpolant = configs["interpolant"]
-    interpolant_der = configs["interpolant_der"]
+    s_schedule = optax.warmup_cosine_decay_schedule(
+        init_value=0.0,
+        peak_value=hyperparams["s_peak_value"],
+        warmup_steps=2_000,
+        decay_steps=steps,
+        end_value=1e-5,
+    )
+    if hyperparams["v_optimizer"] == "adamw":
+        v_opt = optax.adamw
+    elif hyperparams["v_optimizer"] == "adam":
+        v_opt = optax.adam
+    elif hyperparams["v_optimizer"] == "adagrad":
+        v_opt = optax.adagrad
+    elif hyperparams["v_optimizer"] == "adamaxw":
+        v_opt = optax.adamaxw
+
+    if hyperparams["s_optimizer"] == "adamw":
+        s_opt = optax.adamw
+    elif hyperparams["s_optimizer"] == "adam":
+        s_opt = optax.adam
+    elif hyperparams["s_optimizer"] == "adagrad":
+        s_opt = optax.adagrad
+    elif hyperparams["s_optimizer"] == "adamaxw":
+        s_opt = optax.adamaxw
+    v_optimizer = optax.chain(optax.clip_by_global_norm(1.0), v_opt(v_schedule))
+    s_optimizer = optax.chain(optax.clip_by_global_norm(1.0), s_opt(s_schedule))
+    if hyperparams["interpolant"] == "linear_interpolant":
+        interpolant = linear_interpolant
+    elif hyperparams["interpolant"] == "trig_interpolant":
+        interpolant = trig_interpolant
+    elif hyperparams["interpolant"] == "sigmoid_interpolant":
+        interpolant = sigmoid_interpolant
+
+    if hyperparams["interpolant_der"] == "linear_interpolant_der":
+        interpolant_der = linear_interpolant_der
+    elif hyperparams["interpolant_der"] == "trig_interpolant_der":
+        interpolant_der = trig_interpolant_der
+    elif hyperparams["interpolant_der"] == "sigmoid_interpolant_der":
+        interpolant_der = sigmoid_interpolant_der
     interpolant_args = {"t": None, "x1": None, "x0": None, "z": None}
 
     trainer = NNSDE(
@@ -445,10 +568,11 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     ytrue_flat_normalized = ys_normalizer.encode(ytrue_flat)
 
     cond_values = ytrue_flat_normalized
-    if sample_no <= 1000:
-        solver_args = {"saveat": "t1", "D_mask": D_mask, "eps":0.0001}
-    else:
-        solver_args = {"saveat": "t1"}
+    # if sample_no <= 1000:
+    #     solver_args = {"saveat": "t1", "D_mask": D_mask, "eps":0.0001}
+    # else:
+    #     solver_args = {"saveat": "t1"}
+    solver_args = {"saveat": "t1", "D_mask": D_mask}
     cond_samples = trainer.conditional_sample(
         cond_values=cond_values,
         u0_cond=us_test_pca,
@@ -523,7 +647,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     print(
         f"These are the kernel values for hmala samples: {ker_jit(hmala_pca, hmala_pca)}"
     )
-    np.save(os.path.join(output_dir, f"u_samps_{i}.npy"), u_samples_gen)
+    # np.save(os.path.join(output_dir, f"u_samps_{i}.npy"), u_samples_gen)
 
 print("Successfully trained all models and now saving results!")
 np.save(os.path.join(output_dir, "nn_sample_convergence.npy"), mmd_array)
