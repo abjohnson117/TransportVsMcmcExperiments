@@ -1,6 +1,6 @@
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 from tqdm.auto import tqdm
@@ -30,7 +30,7 @@ from triangular_transport.flows.dataloaders import (
 
 plt.style.use("ggplot")
 
-output_root = "nn_results"
+output_root = "nn_results_no_loop"
 output_dir = os.path.join(output_root, "ode")
 os.makedirs(output_root, exist_ok=True)
 os.makedirs(output_dir, exist_ok=True)
@@ -108,7 +108,7 @@ elapsed_train = time.perf_counter() - start_train
 
 # Start conditioning
 start_sample = time.perf_counter()
-nsamples = 20000
+nsamples = 1100
 nn_samps = np.zeros((budget, nsamples))
 # for i, n_gen_samples in enumerate(tqdm(gen_sample_list)):
 #     num_cond_vars = conditioning_list[i]
@@ -130,15 +130,24 @@ nn_samps = np.zeros((budget, nsamples))
 #     output_path_cond_vars = os.path.join(output_dir, f"cond_vars_{num_cond_vars}.npy")
 #     np.save(output_path_cond_vars, cond_vars)
 #     print("Saved successfully!")
-for i, y in enumerate(tqdm(conditioning_ys)):
-    cond_var = y.item()
-    cond_samples = velocity.conditional_sample(
-        cond_values=cond_var,
-        nsamples=nsamples,
-        u0_cond=None,
-    )
-    cond_samples = cond_samples[:, yu_dimension[0]]
-    nn_samps[i, :] = cond_samples
+# for i, y in enumerate(tqdm(conditioning_ys)):
+#     cond_var = y.item()
+#     cond_samples = velocity.conditional_sample(
+#         cond_values=cond_var,
+#         nsamples=nsamples,
+#         u0_cond=None,
+#     )
+#     cond_samples = cond_samples[:, yu_dimension[0]]
+#     nn_samps[i, :] = cond_samples
+cond_vars = conditioning_ys.tolist()
+print("About to start drawing samples...")
+cond_samples = velocity.conditional_sample(
+    cond_values=cond_vars,
+    nsamples=nsamples,
+    u0_cond=None,
+)
+cond_sample_list = [cond_sample[:, yu_dimension[0]:] for cond_sample in cond_samples]
+nn_samps = jnp.hstack(cond_samples).T
 elapsed_sample = time.perf_counter() - start_sample
 
 np.save(os.path.join(output_dir, "nn_samps.npy"), nn_samps)

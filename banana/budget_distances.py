@@ -19,10 +19,12 @@ os.makedirs(output_dir, exist_ok=True)
 budget = 4 ** 8
 seed = 1
 rng = np.random.RandomState(seed)
-conditioning_ys = rng.uniform(low=-6, high=1.75, size=(budget, ))
+conditioning_ys = rng.uniform(low=-5, high=1.05, size=(budget, ))
 conditioning_list = [4 ** i for i in range(9)]
 gen_sample_list = list(reversed(conditioning_list))
 rej_samples = np.load("rej_results/rej_samps.npy")
+# nn_samples = np.load("nn_results_no_loop/ode/nn_samps.npy")
+nn_samples = (np.load("nn_results_no_loop/ode/nn_samps.npy").T)[:, 1::2]
 
 wd_nn_array = np.zeros(len(conditioning_list))
 wd_mcmc_array = np.zeros(len(conditioning_list))
@@ -33,12 +35,13 @@ for i, cond_num in enumerate(tqdm(conditioning_list)):
     # We need to get the arg index for the cond_vars values to then subsample from conditioning_ys. Then we choose the corresponding rej_samples and calculate W1d and KSD.
     nsamples = gen_sample_list[i]
     cond_vars = np.load(f"mcmc_results/cond_vars_{cond_num}.npy")
-    nn_samps = np.load(f"nn_results/ode/nn_samps_{nsamples}_{cond_num}.npy")
+    # nn_samps = np.load(f"nn_results/ode/nn_samps_{nsamples}_{cond_num}.npy")
     mcmc_samps = np.load(f"mcmc_results/mcmc_samps_{nsamples}_{cond_num}.npy")
     lookup = {v: i for i, v in enumerate(conditioning_ys)}
-    print(lookup)
+    # print(lookup)
     idxs = np.array([lookup[v] for v in cond_vars])
     rej_samps = rej_samples[idxs, :].T
+    nn_samps = nn_samples[:, idxs]
 
     bad_cols = np.where(np.isnan(nn_samps).any(axis=0))[0]
     keep_cols = np.setdiff1d(np.arange(nn_samps.shape[1]), bad_cols)
