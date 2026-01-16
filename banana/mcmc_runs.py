@@ -1,6 +1,6 @@
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 import jax.numpy as jnp
@@ -15,6 +15,7 @@ from tqdm.auto import tqdm
 import json
 import time
 import argparse
+from emcee import EnsembleSampler
 
 from triangular_transport.mcmc.adaptive_mcmc import AdaptiveMCMC
 
@@ -50,26 +51,43 @@ for i, chain_length in enumerate(tqdm(chain_list)):
     cond_vars = conditioning_ys[rng.choice(budget, size=num_cond_vars, replace=False)]
     mcmc_samps = np.zeros((chain_length, num_cond_vars))
     for k, cond_no in enumerate(cond_vars):
-        @jit
-        def density_V(u):
-            y = cond_no
-            scale = 1 / (2 * sigma_x**2)
-            sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
-            return jnp.squeeze(jnp.exp(-scale * sum_part))
-        adapt_mcmc = AdaptiveMCMC(
-            target_density=density_V,
-            alpha_function=alpha,
-            seed=np.random.choice(1000000),
-            train_dim=1,
-            steps=chain_length,
-            name="Adaptive - Conditional",
-            std_err=0.6,
-            iter_step_adapt=1,
-            cond_no=cond_no,
-            burn_in=burn_in,
-        )
-        adapt_mcmc.fit(print_every=20000)
-        mcmc_samps[:, k] = (adapt_mcmc.samples).reshape(-1)
+        if chain_length <= 4:
+            @jit
+            def density_V(u):
+                y = cond_no
+                scale = 1 / (2 * sigma_x**2)
+                sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
+                return jnp.squeeze(jnp.exp(-scale * sum_part))
+            adapt_mcmc = AdaptiveMCMC(
+                target_density=density_V,
+                alpha_function=alpha,
+                seed=np.random.choice(1000000),
+                train_dim=1,
+                steps=chain_length,
+                name="Adaptive - Conditional",
+                std_err=0.6,
+                iter_step_adapt=1,
+                cond_no=cond_no,
+                burn_in=burn_in,
+            )
+            adapt_mcmc.fit(print_every=20000)
+            mcmc_samps[:, k] = (adapt_mcmc.samples).reshape(-1)
+        else:
+            def log_dens(u):
+                y = cond_no
+                scale = 1 / (2 * sigma_x**2)
+                sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
+                return -scale * sum_part
+            rng2 = np.random.RandomState(42 + i)
+            initial = np.random.randn(4, 1)
+            nwalkers, ndim = initial.shape
+            nsteps = chain_length // nwalkers
+
+            sampler = EnsembleSampler(nwalkers, ndim, log_dens)
+            sampler.run_mcmc(initial, nsteps, progress=True);
+    
+            samps = np.vstack(sampler.chain)
+            mcmc_samps[:, k] = samps.reshape(-1)
     
     output_path = os.path.join(output_dir, f"mcmc_samps_{chain_length}_{num_cond_vars}.npy")
     np.save(output_path, mcmc_samps)
