@@ -78,7 +78,7 @@ for i, chain_length in enumerate(tqdm(chain_list)):
                 scale = 1 / (2 * sigma_x**2)
                 sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
                 return -scale * sum_part
-            rng2 = np.random.RandomState(42 + i)
+            rng2 = np.random.RandomState(42)
             initial = np.random.randn(4, 1)
             nwalkers, ndim = initial.shape
             nsteps = chain_length // nwalkers

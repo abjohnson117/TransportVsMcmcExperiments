@@ -143,7 +143,7 @@ trainer = NNSDE(
 
 start_train = time.perf_counter()
 trainer.train(
-    train_data=target_data,
+    x1_data=target_data,
     train_dim=train_dim,
     batch_size=batch_size,
     steps=steps,
