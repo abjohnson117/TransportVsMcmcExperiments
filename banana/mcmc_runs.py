@@ -25,7 +25,7 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-output_dir = f"mcmc_results_{args.run_id}"
+output_dir = f"mcmc_results/mcmc_results_{args.run_id}"
 os.makedirs(output_dir, exist_ok=True)
 
 budget = 4 ** 8
@@ -51,7 +51,7 @@ for i, chain_length in enumerate(tqdm(chain_list)):
     cond_vars = conditioning_ys[rng.choice(budget, size=num_cond_vars, replace=False)]
     mcmc_samps = np.zeros((chain_length, num_cond_vars))
     for k, cond_no in enumerate(cond_vars):
-        if chain_length <= 4:
+        if chain_length <= 1:
             @jit
             def density_V(u):
                 y = cond_no
@@ -79,7 +79,10 @@ for i, chain_length in enumerate(tqdm(chain_list)):
                 sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
                 return -scale * sum_part
             rng2 = np.random.RandomState(42)
-            initial = np.random.randn(4, 1)
+            if chain_length >= 16:
+                initial = np.random.randn(16, 1)
+            else:
+                initial = np.random.randn(4, 1)
             nwalkers, ndim = initial.shape
             nsteps = chain_length // nwalkers
 
