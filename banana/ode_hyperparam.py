@@ -18,7 +18,7 @@ from tqdm.auto import tqdm
 from typing import Callable
 import pickle
 import equinox as eqx
-from ot.sliced import sliced_wasserstein_distance as swd
+from ot.lp import wasserstein_1d as wd
 
 from ksd import median_heuristic_sigma_jax
 
@@ -166,8 +166,8 @@ class SiOdeSmac:
             ["adamw", "adam", "adagrad", "adamaxw"],
             default="adamw",
         )
-        hidden_layer = Integer("hidden_layer", (850, 1100), default=1000, log=True)
-        num_hidden_layers = Integer("num_hidden_layers", (7, 10), default=8, log=True)
+        hidden_layer = Integer("hidden_layer", (256, 650), default=512, log=True)
+        num_hidden_layers = Integer("num_hidden_layers", (5, 9), default=6, log=True)
         batch_size = Integer("batch_size", (100, 2000), default=128, log=True)
         peak_value = Float("peak_value", (1e-4, 1e-2), default=3e-4, log=True)
 
@@ -243,7 +243,7 @@ class SiOdeSmac:
         schedule = optax.warmup_cosine_decay_schedule(
             init_value=0.0,
             peak_value=config_dict["peak_value"],
-            warmup_steps=2_000,
+            warmup_steps=100,
             decay_steps=steps,
             end_value=1e-5,
         )
@@ -281,11 +281,9 @@ class SiOdeSmac:
             for i, all_samples in enumerate(cond_samples):
                 u_samples_gen = all_samples[:, yu_dimension[0] :]
                 us_gen = np.array(u_samples_gen)
-                swd_list[i] = swd(
+                swd_list[i] = wd(
                         us_gen,
                         samps_list[i],
-                        n_projections=n_projections,
-                        seed=SEED,
                     ) / base_swd_list[i]
                 mmd_list[i] = get_kme(us_gen, samps_list[i])
             swd_average = np.mean(swd_list)
@@ -305,7 +303,7 @@ class SiOdeSmac:
 configs = {"dataset": "banana"}
 
 sep = "\n" + "#" * 80 + "\n"
-output_root = "hyperparam_results_big_network"
+output_root = "hyperparam_results"
 os.makedirs(output_root, exist_ok=True)
 
 
@@ -313,9 +311,9 @@ nsamples = 20000
 cond_values = [0.0, -1.0, -4.2]
 gen_seed = 1
 rng = np.random.RandomState(gen_seed)
-samps0 = np.load("rej_samples_0.npy")[np.random.choice(100000, size=(nsamples, )), :]
-samps1 = np.load("rej_samples_1.npy")[np.random.choice(100000, size=(nsamples, )), :]
-samps4 = np.load("rej_samples_4.npy")[np.random.choice(100000, size=(nsamples, )), :]
+samps0 = np.load("rej_samples_0.npy")
+samps1 = np.load("rej_samples_1.npy")
+samps4 = np.load("rej_samples_4.npy")
 samps_list = [samps0, samps1, samps4]
 us_base = rng.randn(nsamples, 1)
 
@@ -348,14 +346,14 @@ def get_kme(X, Y):
 
 SEED = 42
 n_projections = 2048
-base_swd0 = swd(
-    us_base, samps0, n_projections=n_projections, seed=SEED
+base_swd0 = wd(
+    us_base, samps0
 )
-base_swd1 = swd(
-    us_base, samps1, n_projections=n_projections, seed=SEED
+base_swd1 = wd(
+    us_base, samps1
 )
-base_swd4 = swd(
-    us_base, samps4, n_projections=n_projections, seed=SEED
+base_swd4 = wd(
+    us_base, samps4
 )
 print(f"This is the base swd (0): {base_swd0}")
 print(f"This is the base swd (-1): {base_swd1}")
@@ -363,7 +361,7 @@ print(f"This is the base swd (-4.2): {base_swd4}")
 base_swd_list = [base_swd0, base_swd1, base_swd4]
 
 interpolant_args = {"t": None, "x1": None, "x0": None}
-epochs = 2000
+epochs = 800
 yu_dimension = (1,1)
 x0_data = None
 sample_no_list = [2**i for i in range(1, 15)]
@@ -383,7 +381,7 @@ rel_error_array = np.zeros(len(sample_no_list))
 for i, sample_no in enumerate(sample_no_list):
     run = wandb.init(
         # set the wandb project where this run will be logged
-        project="Banana - SI hyperparams - multiple conditioning values - big network size",
+        project="Banana - SI hyperparams - multiple cond values",
         name=f"iter={i}_n={sample_no}",
         group="sweep",
         reinit=True,
