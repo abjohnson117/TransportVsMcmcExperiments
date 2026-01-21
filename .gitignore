@@ -203,6 +203,7 @@ banana/mcmc_results*
 banana/budget_results
 banana/nn_sde_results
 banana/mcmc_results
+banana/hyperparam_results
 banana/kernel_results
 banana/logs
 poisson-broken

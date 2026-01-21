@@ -56,9 +56,6 @@ from ConfigSpace import (
 from ConfigSpace.conditions import InCondition
 from smac import HyperparameterOptimizationFacade, Scenario
 
-# os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
-# jax.config.update("jax_default_device", jax.devices()[1])
-
 
 class MLP(eqx.Module):
     layers: List[eqx.nn.Linear]  # main hidden layers
@@ -151,11 +148,6 @@ class SiOdeSmac:
             ["linear_interpolant", "trig_interpolant", "sigmoid_interpolant"],
             default="linear_interpolant",
         )
-        interpolant_der = Categorical(
-            "interpolant_der",
-            ["linear_interpolant_der", "trig_interpolant_der", "sigmoid_interpolant_der"],
-            default="linear_interpolant_der",
-        )
         activation = Categorical(
             "activation",
             ["gelu", "selu", "celu", "silu"],
@@ -174,7 +166,6 @@ class SiOdeSmac:
         cs.add(
             [
                 interpolant,
-                interpolant_der,
                 activation,
                 hidden_layer,
                 num_hidden_layers,
@@ -190,16 +181,12 @@ class SiOdeSmac:
 
         if config_dict["interpolant"] == "linear_interpolant":
             interpolant = linear_interpolant
+            interpolant_der = linear_interpolant_der
         elif config_dict["interpolant"] == "trig_interpolant":
             interpolant = trig_interpolant
+            interpolant_der = trig_interpolant_der
         elif config_dict["interpolant"] == "sigmoid_interpolant":
             interpolant = sigmoid_interpolant
-        
-        if config_dict["interpolant_der"] == "linear_interpolant_der":
-            interpolant_der = linear_interpolant_der
-        elif config_dict["interpolant_der"] == "trig_interpolant_der":
-            interpolant_der = trig_interpolant_der
-        elif config_dict["interpolant_der"] == "sigmoid_interpolant_der":
             interpolant_der = sigmoid_interpolant_der
 
         if config_dict["activation"] == "gelu":
