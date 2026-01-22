@@ -206,6 +206,8 @@ banana/mcmc_results
 banana/hyperparam_results
 banana/kernel_results
 banana/logs
+banana/nn_results_no_loop
+banana/converge_results*
 poisson-broken
 # wandb
 # hippylib

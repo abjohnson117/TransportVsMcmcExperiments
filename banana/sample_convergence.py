@@ -76,7 +76,7 @@ args = parser.parse_args()
 RANK = args.run_id
 
 run = wandb.init(
-    project="2D Convergence - Banana - transport v mcmc - hyperparam",
+    project="2D Convergence - Banana - Transport - work",
     name=f"run={RANK}-ode-converge",
 )
 
@@ -172,7 +172,7 @@ loss_iter = 1
 wd_array = np.zeros(len(sample_no_list))
 mmd_array = np.zeros(len(sample_no_list))
 ksd_array = np.zeros(len(sample_no_list))
-epochs = 6000
+epochs = 7000
 rng2 = np.random.RandomState(RANK)
 x1_data = inf_train_gen(data="banana", rng=rng2, batch_size=100000)
 for i, sample_no in tqdm(enumerate(sample_no_list)):
