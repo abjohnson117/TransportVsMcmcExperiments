@@ -14,6 +14,7 @@ from seaborn import kdeplot
 import wandb
 from ot.lp import wasserstein_1d
 import argparse
+import pickle
 
 from triangular_transport.flows.flow_trainer import (
     NNTrainer,
@@ -75,7 +76,7 @@ args = parser.parse_args()
 RANK = args.run_id
 
 run = wandb.init(
-    project="2D Convergence - Banana - transport v mcmc",
+    project="2D Convergence - Banana - transport v mcmc - hyperparam",
     name=f"run={RANK}-ode-converge",
 )
 
@@ -102,6 +103,7 @@ print("About to calculate wd...")
 base_wd = wasserstein_1d(
     us_base,
     samps,
+    p=2,
 )
 print(f"This is the base wd: {base_wd}")
 gamma = median_heuristic_sigma_jax(us_base, samps)
@@ -150,9 +152,9 @@ def log_density_V(u):
 score_V = vmap(vmap(grad(log_density_V)))
 bandwidth = median_heuristic_sigma_jax(samps)
 base_ksd = compute_ksd_jax(samps, score_V, bandwidth=bandwidth)
-base_ksd_no_jax = compute_ksd(samps, score_V)
+# base_ksd_no_jax = compute_ksd(samps, score_V)
 print(f"This is the base_ksd: {base_ksd}")
-print(f"This is the base ksd without jax: {base_ksd_no_jax}")
+# print(f"This is the base ksd without jax: {base_ksd_no_jax}")
 
 sample_no_list = [2**i for i in range(1, 15)]
 sample_no_list.append(20000)
@@ -170,25 +172,29 @@ loss_iter = 1
 wd_array = np.zeros(len(sample_no_list))
 mmd_array = np.zeros(len(sample_no_list))
 ksd_array = np.zeros(len(sample_no_list))
-epochs = 8000
+epochs = 6000
+rng2 = np.random.RandomState(RANK)
+x1_data = inf_train_gen(data="banana", rng=rng2, batch_size=100000)
 for i, sample_no in tqdm(enumerate(sample_no_list)):
+
     key = random.PRNGKey(i + 1 + RANK)
     key, key1, key2, key3, key4 = random.split(key, 5)
     key, subkey1 = random.split(key, 2)
     train_dim = sample_no
     batch_size = 2048
+    # batch_size = hyperparams["batch_size"]
     batch_size = min(batch_size, train_dim)
     batch_size -= 1
     steps_per_epoch = int(np.ceil(train_dim / batch_size))
     steps = steps_per_epoch * epochs
     print_every = 10000
     yu_dimension = (1, 1)
-    target_data = inf_train_gen(data="banana", rng=rng, batch_size=train_dim)
     dim = yu_dimension[0] + yu_dimension[1]
     # hidden_layer_list = [256] * 4 if train_dim < 8000 else [1024] * 8
     # hidden_layer_list = [512] * 6
-    # hidden_layer_list = [256] * 3
-    hidden_layer_list = [1024] * 8
+    hidden_layer_list = [256] * 3
+    # hidden_layer_list = [1024] * 8
+    target_data = x1_data[:sample_no, :]
     model = MLP(
         key=key1,
         dim=dim,
@@ -200,16 +206,17 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     schedule = optax.warmup_cosine_decay_schedule(
         init_value=0.0,
         peak_value=1e-3,
-        warmup_steps=2_000,
+        warmup_steps=2000,
         decay_steps=steps,
         end_value=1e-5,
     )
+
     optimizer = optax.chain(
         optax.clip_by_global_norm(1.0), optax.adamw(schedule)
     )
 
-    interpolant = trig_interpolant
-    interpolant_der = trig_interpolant_der
+    interpolant = linear_interpolant
+    interpolant_der = linear_interpolant_der
     interpolant_args = {"t": None, "x1": None, "x0": None}
 
     trainer = NNTrainer(
@@ -246,7 +253,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         us_gen = cond_samples[:, 1:2]
         mmd_iter_array[j] = get_kme(us_gen, samps)
         wd_iter_array[j] = (
-            wasserstein_1d(np.array(us_gen), samps)
+            wasserstein_1d(np.array(us_gen), samps, p=2)
             / base_wd
         )
         ksd_iter_array[j] = compute_ksd_jax(us_gen, score_V, bandwidth=bandwidth) / base_ksd

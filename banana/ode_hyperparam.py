@@ -6,7 +6,7 @@ from typing import Callable, List
 import gc
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 import jax
@@ -211,9 +211,10 @@ class SiOdeSmac:
         key1, key2 = random.split(key=key, num=2)
         batch_size = config_dict["batch_size"]
         batch_size = min(batch_size, self.train_dim) - 1
-        epochs = self.epochs
-        steps_per_epoch = int(np.ceil(train_dim / batch_size))
-        steps = steps_per_epoch * epochs
+        # epochs = self.epochs
+        # steps_per_epoch = int(np.ceil(train_dim / batch_size))
+        # steps = steps_per_epoch * epochs
+        steps = self.epochs
         yu_dimension = self.yu_dimension
         dim = yu_dimension[0] + yu_dimension[1]
         hidden_layer_list = [config_dict["hidden_layer"]] * (
@@ -332,7 +333,6 @@ def get_kme(X, Y):
     return (MMD(X, Y)) ** 2 / (jnp.mean(ker(Y, Y))) ** 2
 
 SEED = 42
-n_projections = 2048
 base_swd0 = wd(
     us_base, samps0
 )
@@ -348,7 +348,8 @@ print(f"This is the base swd (-4.2): {base_swd4}")
 base_swd_list = [base_swd0, base_swd1, base_swd4]
 
 interpolant_args = {"t": None, "x1": None, "x0": None}
-epochs = 800
+# epochs = 800
+steps = 3000
 yu_dimension = (1,1)
 x0_data = None
 sample_no_list = [2**i for i in range(1, 15)]
@@ -380,7 +381,7 @@ for i, sample_no in enumerate(sample_no_list):
 
     regressor = SiOdeSmac(
         train_dim=train_dim,
-        epochs=epochs,
+        epochs=steps,
         train_data=train_data,
         x0_data=x0_data,
         yu_dimension=yu_dimension,
@@ -389,7 +390,7 @@ for i, sample_no in enumerate(sample_no_list):
 
     scenario = Scenario(
         regressor.configspace,
-        n_trials=150,
+        n_trials=120,
         deterministic=True,
     )
 
