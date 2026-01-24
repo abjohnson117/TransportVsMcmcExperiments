@@ -78,7 +78,7 @@ for i, chain_length in enumerate(tqdm(chain_list)):
                 scale = 1 / (2 * sigma_x**2)
                 sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
                 return -scale * sum_part
-            rng2 = np.random.RandomState(42)
+            rng2 = np.random.RandomState(42) #TODO : Think about this some more. This may be creating the same chain every time. Nevermind, it didn't since I didn't use rng2 later down.
             if chain_length >= 16:
                 initial = np.random.randn(16, 1)
             else:

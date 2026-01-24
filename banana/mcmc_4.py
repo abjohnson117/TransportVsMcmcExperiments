@@ -20,7 +20,6 @@ a = 2
 b = 0.1
 sigma_x = 1
 cond_no = -4.2
-nsamples = 100000
 
 def log_dens(u):
     y = cond_no
@@ -30,15 +29,15 @@ def log_dens(u):
 
 no_trials = 10
 nsamples = 100000
-nsteps = 25000
-nwalkers = 4
+nwalkers = 16
+nsteps = nsamples // nwalkers
 ndim = 1
-mcmc_samps = np.zeros((no_trials, nwalkers, nsamples, ndim))
-sample_no_list = np.load("sample_no_list.npy")
+mcmc_samps = np.zeros((no_trials, nwalkers, nsteps, ndim))
+sample_no_list = np.load("sample_no_list.npy").tolist()
 start = time.perf_counter()
 for i in range(no_trials):
-    rng2 = np.random.RandomState(45)
-    initial = rng2.randn(nwalkers, ndim)
+    # rng2 = np.random.RandomState(45 + i)
+    initial = np.random.randn(nwalkers, ndim)
     sampler = EnsembleSampler(nwalkers, ndim, log_dens)
     sampler.run_mcmc(initial, nsteps, progress=True)
 
@@ -51,6 +50,7 @@ rng = np.random.RandomState(seed)
 samps = np.load("rej_samples_4.npy")[
     rng.choice(100000, size=(choose_samples,)), :
 ]
+# print(samps.reshape(-1).shape)
 us_base = rng.randn(20000, 1)
 base_wd = wd(
     us_base.reshape(-1),
@@ -62,17 +62,19 @@ wd_array = np.zeros((no_trials, len(sample_no_list)))
 for j in tqdm(range(no_trials)):
     for i, sample_no in enumerate(sample_no_list):
         subsamps = mcmc_samps[j, :, :, :]
-        if sample_no == 2:
+        # print(subsamps.shape)
+        if sample_no < 16:
             subsamps = subsamps[:sample_no, 0, :]
+            # print(subsamps.shape)
             wd1 = wd(
-                subsamps,
+                subsamps.reshape(-1),
                 samps.reshape(-1),
                 p=2
             )
         else:
-            subsamps = subsamps[:, : (sample_no / nwalkers), :].reshape(sample_no, ndim)
+            subsamps = subsamps[:, : sample_no // nwalkers, :].reshape(sample_no, ndim)
             wd1 = wd(
-                subsamps,
+                subsamps.reshape(-1),
                 samps.reshape(-1),
                 p=2
             )

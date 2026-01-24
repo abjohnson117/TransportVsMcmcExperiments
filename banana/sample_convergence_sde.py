@@ -88,10 +88,7 @@ os.makedirs(output_dir4, exist_ok=True)
 
 nsamples = 20000
 seed = 1
-n_projections = 2048
 rng = np.random.RandomState(seed)
-# base_data = inf_train_gen(data="banana", rng=rng, batch_size=nsamples)
-# us_base = base_data[:, 1:2]
 samps0 = np.load("rej_samples_0.npy")[
     rng.choice(100000, size=(nsamples,)), :
 ]
@@ -147,9 +144,6 @@ def MMD(X, Y):
 @jax.jit
 def get_kme(X, Y):
     return (MMD(X, Y)) ** 2 / (jnp.mean(ker(Y, Y))) ** 2
-
-
-# print(f"This is the base MMD: {get_kme(us_base, samps)}")
 
 a = 2
 b = 0.1

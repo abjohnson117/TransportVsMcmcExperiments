@@ -317,7 +317,6 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     print(f"This is the relative SWD error on -4.2: {wd4_array[i]}")
     print(f"This is the relative KSD error on -4.2: {ksd4_array[i]}")
 
-print("Successfully trained all models and now saving results!")
 np.save(os.path.join(output_dir0, f"nn_conv_mmd_{RANK}.npy"), mmd0_array)
 np.save(os.path.join(output_dir0, f"nn_conv_wd_{RANK}.npy"), wd0_array)
 np.save(os.path.join(output_dir0, f"nn_conv_ksd_{RANK}.npy"), ksd0_array)
@@ -325,3 +324,4 @@ np.save(os.path.join(output_dir0, f"nn_conv_ksd_{RANK}.npy"), ksd0_array)
 np.save(os.path.join(output_dir4, f"nn_conv_mmd_{RANK}.npy"), mmd4_array)
 np.save(os.path.join(output_dir4, f"nn_conv_wd_{RANK}.npy"), wd4_array)
 np.save(os.path.join(output_dir4, f"nn_conv_ksd_{RANK}.npy"), ksd4_array)
+print("Successfully trained all models and now saving results!")
