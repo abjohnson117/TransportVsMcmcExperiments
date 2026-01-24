@@ -1,0 +1,109 @@
+import os
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+
+import jax.numpy as jnp
+from jax import jit
+import matplotlib.pyplot as plt
+import numpy as np
+from ot.lp import wasserstein_1d as wd
+from tqdm.auto import tqdm
+import time
+import json
+
+from triangular_transport.mcmc.adaptive_mcmc import AdaptiveMCMC
+from triangular_transport.kernels.kernel_tools import get_gaussianRBF, get_sum_of_kernels, vectorize_kfunc
+
+plt.style.use("ggplot")
+
+output_root = "mcmc_results_0"
+os.makedirs(output_root, exist_ok=True)
+
+a = 2
+b = 0.1
+sigma_x = 1
+cond_no = 0.0
+nsamples = 100000
+
+@jit
+def density_V(u):
+    y = cond_no
+    scale = 1 / (2 * sigma_x**2)
+    sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
+    return jnp.squeeze(jnp.exp(-scale * sum_part))
+
+def alpha(x, w, log_density):
+    log_w = log_density(w)
+    log_x = log_density(x)
+    return jnp.minimum(0.0, log_w - log_x)
+
+no_trials = 10
+nsamples = 100000
+adapt_mcmc_samps = np.zeros((no_trials, nsamples, 1))
+start = time.perf_counter()
+for i in range(no_trials):
+    adapt_mcmc = AdaptiveMCMC(
+        target_density=density_V,
+        alpha_function=alpha,
+        seed=i,
+        train_dim=1,
+        steps=nsamples,
+        name="Adaptive - Conditional",
+        std_err=0.6,
+        iter_step_adapt=1,
+        cond_no=cond_no,
+        burn_in=1, # TODO: Rerun everything with low burn_in
+    )
+    adapt_mcmc.fit(print_every=20000)
+    adapt_mcmc_samps[i, :, :] = adapt_mcmc.samples
+elapsed = time.perf_counter() - start
+
+seed = 1
+choose_samples = 20000
+rng = np.random.RandomState(seed)
+samps = np.load("rej_samples_0.npy")[
+    rng.choice(100000, size=(choose_samples,)), :
+]
+us_base = rng.randn(20000, 1)
+base_wd = wd(
+    us_base.reshape(-1),
+    samps.reshape(-1),
+)
+
+sample_no_list = [2**i for i in range(1, 15)]
+sample_no_list.append(20000)
+sample_no_list.append(30000)
+sample_no_list.append(40000)
+sample_no_list.append(50000)
+sample_no_list.append(60000)
+sample_no_list.append(70000)
+sample_no_list.append(80000)
+sample_no_list.append(90000)
+sample_no_list.append(100000)
+
+wd_array = np.zeros((no_trials, len(sample_no_list)))
+
+for j in tqdm(range(no_trials)):
+    for i, sample_no in enumerate(sample_no_list):
+        wd1 = wd(
+            adapt_mcmc_samps[j, :sample_no, :].reshape(-1),
+            samps.reshape(-1),
+            p=2.
+        )
+
+        wd_array[j, i] = wd1
+
+avg_wd_array = np.mean(wd_array / base_wd, axis=0)
+std_wd_array = np.std(wd_array / base_wd, axis=0)
+
+np.save(os.path.join(output_root, "avg_wd_mcmc.npy"), avg_wd_array)
+np.save(os.path.join(output_root, "std_wd_mcmc.npy"), std_wd_array)
+np.save(os.path.join(output_root, "mcmc_samps.npy"), adapt_mcmc_samps)
+timings = {
+    "mcmc_time": elapsed,
+    "timestamp": time.time()
+}
+
+with open(os.path.join(output_root, "timings.json"), "w") as f:
+    json.dump(timings, f, indent=2)

@@ -76,7 +76,7 @@ args = parser.parse_args()
 RANK = args.run_id
 
 run = wandb.init(
-    project="2D Convergence - Banana - Transport - outer and inner",
+    project="2D Convergence - Banana - Transport - ode",
     name=f"run={RANK}-ode-converge",
 )
 
@@ -212,8 +212,8 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     yu_dimension = (1, 1)
     dim = yu_dimension[0] + yu_dimension[1]
     # hidden_layer_list = [256] * 4 if train_dim < 8000 else [1024] * 8
-    # hidden_layer_list = [512] * 6
-    hidden_layer_list = [256] * 3
+    hidden_layer_list = [512] * 6
+    # hidden_layer_list = [256] * 3
     # hidden_layer_list = [1024] * 8
     target_data = x1_data[:sample_no, :]
     model = MLP(
@@ -270,7 +270,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     wd_iter_array = np.zeros(2)
     ksd_iter_array = np.zeros(2)
     for k, cond_sample in enumerate(cond_samples):
-        us_gen = cond_samples[:, 1:2]
+        us_gen = cond_samples[k][:, 1:2]
         if k == 0:
             samps = samps0
             score_V = score_V0

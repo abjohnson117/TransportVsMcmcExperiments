@@ -1,6 +1,6 @@
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 from tqdm.auto import tqdm
@@ -17,15 +17,7 @@ import argparse
 import pickle
 
 from triangular_transport.flows.sde_flow_trainer import NNSDE
-
-from triangular_transport.flows.interpolants import (
-    linear_interpolant,
-    linear_interpolant_der,
-    trig_interpolant,
-    trig_interpolant_der,
-    sigmoid_interpolant,
-    sigmoid_interpolant_der,
-)
+from triangular_transport.flows.interpolants import linear_interpolant_noise, linear_interpolant_der_noise
 from triangular_transport.flows.loss_functions import vec_field_loss, denoiser_loss
 from triangular_transport.networks.flow_networks import MLP
 from triangular_transport.flows.methods.sampling import inf_train_gen
@@ -65,6 +57,8 @@ def median_heuristic_sigma_jax(X, Y=None, max_points=5000, seed=0):
     sigma = jnp.median(D)
     return float(sigma)
 
+def gamma_fn(t):
+    return 0.1 * jnp.sqrt(2 * (t - t**2) + 1e-8)
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -74,8 +68,8 @@ args = parser.parse_args()
 RANK = args.run_id
 
 run = wandb.init(
-    project="2D Convergence - Banana - Transport - outer and inner",
-    name=f"run={RANK}-ode-converge",
+    project="2D Convergence - Banana - Transport - sde (debug)",
+    name=f"run={RANK}-sde-converge",
 )
 
 # Kernel stuff for MMD
@@ -216,6 +210,7 @@ ksd4_array = np.zeros(len(sample_no_list))
 epochs = 7000
 rng2 = np.random.RandomState(RANK)
 x1_data = inf_train_gen(data="banana", rng=rng2, batch_size=100000)
+solver_args = {"saveat": "t1", "eps": 5e-3}
 for i, sample_no in tqdm(enumerate(sample_no_list)):
 
     key = random.PRNGKey(i + 1 + RANK)
@@ -233,23 +228,24 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     dim = yu_dimension[0] + yu_dimension[1]
     # hidden_layer_list = [256] * 4 if train_dim < 8000 else [1024] * 8
     # hidden_layer_list = [512] * 6
-    hidden_layer_list = [256] * 3
+    hidden_layer_list_vel = [256] * 3
+    hidden_layer_list_score = [512] * 4
     # hidden_layer_list = [1024] * 8
     target_data = x1_data[:sample_no, :]
     velocity = MLP(
         key=key1,
         dim=dim,
         time_varying=True,
-        w=hidden_layer_list,
-        num_layers=len(hidden_layer_list) + 1,
+        w=hidden_layer_list_vel,
+        num_layers=len(hidden_layer_list_vel) + 1,
         activation_fn=jax.nn.gelu,  # GeLU worked well
     )
     score = MLP(
         key=key2,
         dim=dim,
         time_varying=True,
-        w=hidden_layer_list,
-        num_layers=len(hidden_layer_list) + 1,
+        w=hidden_layer_list_score,
+        num_layers=len(hidden_layer_list_score) + 1,
         activation_fn=jax.nn.gelu,  # GeLU worked well
     )
     v_schedule = optax.warmup_cosine_decay_schedule(
@@ -261,7 +257,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     )
     s_schedule = optax.warmup_cosine_decay_schedule(
         init_value=0.0,
-        peak_value=1e-3,
+        peak_value=3e-4,
         warmup_steps=2000,
         decay_steps=steps,
         end_value=1e-5,
@@ -271,12 +267,12 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         optax.clip_by_global_norm(1.0), optax.adamw(v_schedule)
     )
     s_optimizer = optax.chain(
-        optax.clip_by_global_norm(1.0), optax.adamw(s_schedule)
+        optax.clip_by_global_norm(1.0), optax.adam(s_schedule)
     )
 
-    interpolant = linear_interpolant
-    interpolant_der = linear_interpolant_der
-    interpolant_args = {"t": None, "x1": None, "x0": None}
+    interpolant = linear_interpolant_noise
+    interpolant_der = linear_interpolant_der_noise
+    interpolant_args = {"t": None, "x1": None, "x0": None, "z": None}
 
     trainer = NNSDE(
         target_density=None,
@@ -306,6 +302,8 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         cond_values=cond_vals,
         nsamples=nsamples,
         u0_cond=None,
+        solver_args=solver_args,
+        gamma=gamma_fn,
     )
     mmd_iter_array = np.zeros(3)
     wd_iter_array = np.zeros(3)
@@ -322,7 +320,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
             score_V = score_V1
             base_wd = base_wd1
             base_ksd = base_ksd1
-        elif k == 4:
+        elif k == 2:
             samps = samps4
             score_V = score_V4
             base_wd = base_wd4

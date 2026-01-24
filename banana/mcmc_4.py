@@ -1,0 +1,94 @@
+import os
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
+
+import matplotlib.pyplot as plt
+import numpy as np
+from ot.lp import wasserstein_1d as wd
+from tqdm.auto import tqdm
+import json
+import time
+from emcee import EnsembleSampler
+
+plt.style.use("ggplot")
+
+output_root = "mcmc_results_4"
+os.makedirs(output_root, exist_ok=True)
+
+a = 2
+b = 0.1
+sigma_x = 1
+cond_no = -4.2
+nsamples = 100000
+
+def log_dens(u):
+    y = cond_no
+    scale = 1 / (2 * sigma_x**2)
+    sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
+    return -scale * sum_part
+
+no_trials = 10
+nsamples = 100000
+nsteps = 25000
+nwalkers = 4
+ndim = 1
+mcmc_samps = np.zeros((no_trials, nwalkers, nsamples, ndim))
+sample_no_list = np.load("sample_no_list.npy")
+start = time.perf_counter()
+for i in range(no_trials):
+    rng2 = np.random.RandomState(45)
+    initial = rng2.randn(nwalkers, ndim)
+    sampler = EnsembleSampler(nwalkers, ndim, log_dens)
+    sampler.run_mcmc(initial, nsteps, progress=True)
+
+    mcmc_samps[i, :, :, :] = sampler.chain
+
+elapsed = time.perf_counter() - start
+seed = 1
+choose_samples = 20000
+rng = np.random.RandomState(seed)
+samps = np.load("rej_samples_4.npy")[
+    rng.choice(100000, size=(choose_samples,)), :
+]
+us_base = rng.randn(20000, 1)
+base_wd = wd(
+    us_base.reshape(-1),
+    samps.reshape(-1),
+)
+
+wd_array = np.zeros((no_trials, len(sample_no_list)))
+
+for j in tqdm(range(no_trials)):
+    for i, sample_no in enumerate(sample_no_list):
+        subsamps = mcmc_samps[j, :, :, :]
+        if sample_no == 2:
+            subsamps = subsamps[:sample_no, 0, :]
+            wd1 = wd(
+                subsamps,
+                samps.reshape(-1),
+                p=2
+            )
+        else:
+            subsamps = subsamps[:, : (sample_no / nwalkers), :].reshape(sample_no, ndim)
+            wd1 = wd(
+                subsamps,
+                samps.reshape(-1),
+                p=2
+            )
+
+        wd_array[j, i] = wd1
+
+avg_wd_array = np.mean(wd_array / base_wd, axis=0)
+std_wd_array = np.std(wd_array / base_wd, axis=0)
+
+np.save(os.path.join(output_root, "avg_wd_mcmc.npy"), avg_wd_array)
+np.save(os.path.join(output_root, "std_wd_mcmc.npy"), std_wd_array)
+np.save(os.path.join(output_root, "mcmc_samps.npy"), mcmc_samps)
+timings = {
+    "mcmc_time": elapsed,
+    "timestamp": time.time()
+}
+
+with open(os.path.join(output_root, "timings.json"), "w") as f:
+    json.dump(timings, f, indent=2)
