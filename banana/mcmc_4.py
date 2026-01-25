@@ -10,6 +10,7 @@ from tqdm.auto import tqdm
 import json
 import time
 from emcee import EnsembleSampler
+import emcee
 
 plt.style.use("ggplot")
 
@@ -38,10 +39,15 @@ start = time.perf_counter()
 for i in range(no_trials):
     # rng2 = np.random.RandomState(45 + i)
     initial = np.random.randn(nwalkers, ndim)
-    sampler = EnsembleSampler(nwalkers, ndim, log_dens)
+    sampler = EnsembleSampler(nwalkers, ndim, log_dens, moves=[
+        (emcee.moves.DEMove(), 0.5),
+        (emcee.moves.DESnookerMove(), 0.15),
+        (emcee.moves.KDEMove(), 0.35),
+    ])
     sampler.run_mcmc(initial, nsteps, progress=True)
 
     mcmc_samps[i, :, :, :] = sampler.chain
+    # print(f"Autocorrelation time: {sampler.get_autocorr_time()[0]} steps")
 
 elapsed = time.perf_counter() - start
 seed = 1
@@ -63,7 +69,7 @@ for j in tqdm(range(no_trials)):
     for i, sample_no in enumerate(sample_no_list):
         subsamps = mcmc_samps[j, :, :, :]
         # print(subsamps.shape)
-        if sample_no < 16:
+        if sample_no < nwalkers:
             subsamps = subsamps[:sample_no, 0, :]
             # print(subsamps.shape)
             wd1 = wd(
