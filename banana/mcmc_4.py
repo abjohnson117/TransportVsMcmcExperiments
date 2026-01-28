@@ -44,6 +44,7 @@ for i in range(no_trials):
         (emcee.moves.DESnookerMove(), 0.15),
         (emcee.moves.KDEMove(), 0.35),
     ])
+    # sampler = EnsembleSampler(nwalkers, ndim, log_dens)
     sampler.run_mcmc(initial, nsteps, progress=True)
 
     mcmc_samps[i, :, :, :] = sampler.chain
@@ -51,16 +52,15 @@ for i in range(no_trials):
 
 elapsed = time.perf_counter() - start
 seed = 1
-choose_samples = 20000
+choose_samples = 100000
 rng = np.random.RandomState(seed)
-samps = np.load("rej_samples_4.npy")[
-    rng.choice(100000, size=(choose_samples,)), :
-]
+samps = np.load("rej_samples_4.npy")
 # print(samps.reshape(-1).shape)
 us_base = rng.randn(20000, 1)
 base_wd = wd(
     us_base.reshape(-1),
     samps.reshape(-1),
+    p=2,
 )
 
 wd_array = np.zeros((no_trials, len(sample_no_list)))

@@ -68,7 +68,7 @@ args = parser.parse_args()
 RANK = args.run_id
 
 run = wandb.init(
-    project="2D Convergence - Banana - Transport - sde (debug)",
+    project="2D Convergence - Banana - Transport - sde (last)",
     name=f"run={RANK}-sde-converge",
 )
 

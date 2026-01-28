@@ -76,7 +76,7 @@ args = parser.parse_args()
 RANK = args.run_id
 
 run = wandb.init(
-    project="2D Convergence - Banana - Transport - ode",
+    project="2D Convergence - Banana - Transport - ode (last)",
     name=f"run={RANK}-ode-converge",
 )
 
@@ -86,27 +86,32 @@ output_root0 = "converge_results_0"
 output_dir0 = os.path.join(output_root0, f"run_{RANK:02d}")
 os.makedirs(output_dir0, exist_ok=True)
 
+output_root1 = "converge_results_banana"
+output_dir1 = os.path.join(output_root1, f"run_{RANK:02d}")
+os.makedirs(output_dir1, exist_ok=True)
+
 output_root4 = "converge_results_4"
 output_dir4 = os.path.join(output_root4, f"run_{RANK:02d}")
 os.makedirs(output_dir4, exist_ok=True)
 
-nsamples = 20000
+nsamples = 100000
 seed = 1
-n_projections = 2048
 rng = np.random.RandomState(seed)
 # base_data = inf_train_gen(data="banana", rng=rng, batch_size=nsamples)
 # us_base = base_data[:, 1:2]
-samps0 = np.load("rej_samples_0.npy")[
-    rng.choice(100000, size=(nsamples,)), :
-]
-samps4 = np.load("rej_samples_4.npy")[
-    rng.choice(100000, size=(nsamples,)), :
-]
+samps0 = np.load("rej_samples_0.npy")
+samps1 = np.load("rej_samples_1.npy")
+samps4 = np.load("rej_samples_4.npy")
 us_base = rng.randn(nsamples, 1)
 print("About to calculate wd...")
 base_wd0 = wasserstein_1d(
     us_base,
     samps0,
+    p=2,
+)
+base_wd1 = wasserstein_1d(
+    us_base,
+    samps1,
     p=2,
 )
 base_wd4 = wasserstein_1d(
@@ -150,11 +155,17 @@ a = 2
 b = 0.1
 sigma_x = 1
 cond_no0 = 0.0
+cond_no1 = -1.0
 cond_no4 = -4.2
-cond_vals = [cond_no0, cond_no4]
+cond_vals = [cond_no0, cond_no1, cond_no4]
 
 def log_density_V0(u):
     y = cond_no0
+    scale = 1 / (2 * sigma_x**2)
+    sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
+    return jnp.squeeze(-scale * sum_part)
+def log_density_V1(u):
+    y = cond_no1
     scale = 1 / (2 * sigma_x**2)
     sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
     return jnp.squeeze(-scale * sum_part)
@@ -166,9 +177,11 @@ def log_density_V4(u):
 
 
 score_V0 = vmap(vmap(grad(log_density_V0)))
+score_V1 = vmap(vmap(grad(log_density_V1)))
 score_V4 = vmap(vmap(grad(log_density_V4)))
 bandwidth = median_heuristic_sigma_jax(samps4)
 base_ksd0 = compute_ksd_jax(samps0, score_V0, bandwidth=bandwidth)
+base_ksd1 = compute_ksd_jax(samps1, score_V1, bandwidth=bandwidth)
 base_ksd4 = compute_ksd_jax(samps4, score_V4, bandwidth=bandwidth)
 # base_ksd_no_jax = compute_ksd(samps, score_V)
 # print(f"This is the base_ksd: {base_ksd}")
@@ -190,6 +203,9 @@ loss_iter = 1
 wd0_array = np.zeros(len(sample_no_list))
 mmd0_array = np.zeros(len(sample_no_list))
 ksd0_array = np.zeros(len(sample_no_list))
+wd1_array = np.zeros(len(sample_no_list))
+mmd1_array = np.zeros(len(sample_no_list))
+ksd1_array = np.zeros(len(sample_no_list))
 wd4_array = np.zeros(len(sample_no_list))
 mmd4_array = np.zeros(len(sample_no_list))
 ksd4_array = np.zeros(len(sample_no_list))
@@ -277,6 +293,11 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
             base_wd = base_wd0
             base_ksd = base_ksd0
         elif k == 1:
+            samps = samps1
+            score_V = score_V1
+            base_wd = base_wd1
+            base_ksd = base_ksd1
+        elif k == 2:
             samps = samps4
             score_V = score_V4
             base_wd = base_wd4
@@ -290,6 +311,9 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     mmd0_array[i] = mmd_iter_array[0]
     wd0_array[i] = wd_iter_array[0]
     ksd0_array[i] = ksd_iter_array[0]
+    mmd1_array[i] = mmd_iter_array[0]
+    wd1_array[i] = wd_iter_array[0]
+    ksd1_array[i] = ksd_iter_array[0]
     mmd4_array[i] = mmd_iter_array[1]
     wd4_array[i] = wd_iter_array[1]
     ksd4_array[i] = ksd_iter_array[1]
@@ -301,18 +325,29 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     )
     wandb.log(
         {
+            "relative error (wd): -1": wd1_array[i]
+        },
+        step=sample_no,
+    )
+    wandb.log(
+        {
             "relative error (wd): -4.2": wd4_array[i]
         },
         step=sample_no,
     )
     # wandb.log({"relative error (swd) - mcmc": swd_mcmc[i]}, step=sample_no)
     wandb.log({"relative error (mmd): 0": mmd0_array[i]}, step=sample_no)
+    wandb.log({"relative error (mmd): -1": mmd1_array[i]}, step=sample_no)
     wandb.log({"relative error (mmd): -4.2": mmd4_array[i]}, step=sample_no)
     wandb.log({"relative error (ksd): 0": ksd0_array[i]}, step=sample_no)
+    wandb.log({"relative error (ksd): -1": ksd1_array[i]}, step=sample_no)
     wandb.log({"relative error (ksd): -4.2": ksd4_array[i]}, step=sample_no)
     print(f"This is the relative MMD error on 0.0: {mmd0_array[i]}")
     print(f"This is the relative SWD error on 0.0: {wd0_array[i]}")
     print(f"This is the relative KSD error on 0.0: {ksd0_array[i]}")
+    print(f"This is the relative MMD error on -1.0: {mmd1_array[i]}")
+    print(f"This is the relative SWD error on -1.0: {wd1_array[i]}")
+    print(f"This is the relative KSD error on -1.0: {ksd1_array[i]}")
     print(f"This is the relative MMD error on -4.2: {mmd4_array[i]}")
     print(f"This is the relative SWD error on -4.2: {wd4_array[i]}")
     print(f"This is the relative KSD error on -4.2: {ksd4_array[i]}")
@@ -320,6 +355,10 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
 np.save(os.path.join(output_dir0, f"nn_conv_mmd_{RANK}.npy"), mmd0_array)
 np.save(os.path.join(output_dir0, f"nn_conv_wd_{RANK}.npy"), wd0_array)
 np.save(os.path.join(output_dir0, f"nn_conv_ksd_{RANK}.npy"), ksd0_array)
+
+np.save(os.path.join(output_dir1, f"nn_conv_mmd_{RANK}.npy"), mmd0_array)
+np.save(os.path.join(output_dir1, f"nn_conv_wd_{RANK}.npy"), wd0_array)
+np.save(os.path.join(output_dir1, f"nn_conv_ksd_{RANK}.npy"), ksd0_array)
 
 np.save(os.path.join(output_dir4, f"nn_conv_mmd_{RANK}.npy"), mmd4_array)
 np.save(os.path.join(output_dir4, f"nn_conv_wd_{RANK}.npy"), wd4_array)
