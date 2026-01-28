@@ -16,6 +16,7 @@ import json
 import time
 import argparse
 from emcee import EnsembleSampler
+import emcee
 
 from triangular_transport.mcmc.adaptive_mcmc import AdaptiveMCMC
 
@@ -86,7 +87,11 @@ for i, chain_length in enumerate(tqdm(chain_list)):
             nwalkers, ndim = initial.shape
             nsteps = chain_length // nwalkers
 
-            sampler = EnsembleSampler(nwalkers, ndim, log_dens)
+            sampler = EnsembleSampler(nwalkers, ndim, log_dens, moves=[
+                (emcee.moves.DEMove(), 0.5),
+                (emcee.moves.DESnookerMove(), 0.15),
+                (emcee.moves.KDEMove(), 0.35),
+            ])
             sampler.run_mcmc(initial, nsteps, progress=True);
     
             samps = np.vstack(sampler.chain)
