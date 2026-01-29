@@ -67,9 +67,9 @@ for i, cond_num in enumerate(tqdm(conditioning_list)):
     sde_array = np.zeros(cond_num)
     mcmc_array = np.zeros(cond_num)
     for j in range(cond_num):
-        nn_array[j] = wd(nn_samps[:, j].reshape(-1), rej_samps[:, j].reshape(-1))
-        sde_array[j] = wd(sde_samps[:, j].reshape(-1), rej_samps[:, j].reshape(-1))
-        mcmc_array[j] = wd(mcmc_samps[:, j].reshape(-1), rej_samps[:, j].reshape(-1))
+        nn_array[j] = wd(nn_samps[:, j].reshape(-1), rej_samps[:, j].reshape(-1), p=2)
+        sde_array[j] = wd(sde_samps[:, j].reshape(-1), rej_samps[:, j].reshape(-1), p=2)
+        mcmc_array[j] = wd(mcmc_samps[:, j].reshape(-1), rej_samps[:, j].reshape(-1), p=2)
     wd_nn_array[i] = np.mean(nn_array)
     wd_nn_sde_array[i] = np.mean(sde_array)
     wd_mcmc_array[i] = np.mean(mcmc_array)

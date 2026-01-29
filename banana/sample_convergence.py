@@ -1,6 +1,6 @@
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 from tqdm.auto import tqdm
@@ -120,6 +120,7 @@ base_wd4 = wasserstein_1d(
     p=2,
 )
 print(f"This is the base wd0: {base_wd0}")
+print(f"This is the base wd1: {base_wd1}")
 print(f"This is the base wd4: {base_wd4}")
 gamma = median_heuristic_sigma_jax(us_base, samps4)
 k1 = get_gaussianRBF(gamma)
@@ -159,30 +160,30 @@ cond_no1 = -1.0
 cond_no4 = -4.2
 cond_vals = [cond_no0, cond_no1, cond_no4]
 
-def log_density_V0(u):
-    y = cond_no0
-    scale = 1 / (2 * sigma_x**2)
-    sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
-    return jnp.squeeze(-scale * sum_part)
-def log_density_V1(u):
-    y = cond_no1
-    scale = 1 / (2 * sigma_x**2)
-    sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
-    return jnp.squeeze(-scale * sum_part)
-def log_density_V4(u):
-    y = cond_no4
-    scale = 1 / (2 * sigma_x**2)
-    sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
-    return jnp.squeeze(-scale * sum_part)
+# def log_density_V0(u):
+#     y = cond_no0
+#     scale = 1 / (2 * sigma_x**2)
+#     sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
+#     return jnp.squeeze(-scale * sum_part)
+# def log_density_V1(u):
+#     y = cond_no1
+#     scale = 1 / (2 * sigma_x**2)
+#     sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
+#     return jnp.squeeze(-scale * sum_part)
+# def log_density_V4(u):
+#     y = cond_no4
+#     scale = 1 / (2 * sigma_x**2)
+#     sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
+#     return jnp.squeeze(-scale * sum_part)
 
 
-score_V0 = vmap(vmap(grad(log_density_V0)))
-score_V1 = vmap(vmap(grad(log_density_V1)))
-score_V4 = vmap(vmap(grad(log_density_V4)))
-bandwidth = median_heuristic_sigma_jax(samps4)
-base_ksd0 = compute_ksd_jax(samps0, score_V0, bandwidth=bandwidth)
-base_ksd1 = compute_ksd_jax(samps1, score_V1, bandwidth=bandwidth)
-base_ksd4 = compute_ksd_jax(samps4, score_V4, bandwidth=bandwidth)
+# score_V0 = vmap(vmap(grad(log_density_V0)))
+# score_V1 = vmap(vmap(grad(log_density_V1)))
+# score_V4 = vmap(vmap(grad(log_density_V4)))
+# bandwidth = median_heuristic_sigma_jax(samps4)
+# base_ksd0 = compute_ksd_jax(samps0, score_V0, bandwidth=bandwidth)
+# base_ksd1 = compute_ksd_jax(samps1, score_V1, bandwidth=bandwidth)
+# base_ksd4 = compute_ksd_jax(samps4, score_V4, bandwidth=bandwidth)
 # base_ksd_no_jax = compute_ksd(samps, score_V)
 # print(f"This is the base_ksd: {base_ksd}")
 # print(f"This is the base ksd without jax: {base_ksd_no_jax}")
@@ -201,14 +202,14 @@ sample_no_list.append(100000)
 loss_iter = 1
 # hidden_layer_list = [[256] * 2, [256] * 3, [256] * 4, [512] * 3, [512] * 4, [512] * 6, [1024] * 8]
 wd0_array = np.zeros(len(sample_no_list))
-mmd0_array = np.zeros(len(sample_no_list))
-ksd0_array = np.zeros(len(sample_no_list))
+# mmd0_array = np.zeros(len(sample_no_list))
+# ksd0_array = np.zeros(len(sample_no_list))
 wd1_array = np.zeros(len(sample_no_list))
-mmd1_array = np.zeros(len(sample_no_list))
-ksd1_array = np.zeros(len(sample_no_list))
+# mmd1_array = np.zeros(len(sample_no_list))
+# ksd1_array = np.zeros(len(sample_no_list))
 wd4_array = np.zeros(len(sample_no_list))
-mmd4_array = np.zeros(len(sample_no_list))
-ksd4_array = np.zeros(len(sample_no_list))
+# mmd4_array = np.zeros(len(sample_no_list))
+# ksd4_array = np.zeros(len(sample_no_list))
 epochs = 7000
 rng2 = np.random.RandomState(RANK)
 x1_data = inf_train_gen(data="banana", rng=rng2, batch_size=100000)
@@ -282,41 +283,41 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         nsamples=nsamples,
         u0_cond=None,
     )
-    mmd_iter_array = np.zeros(2)
-    wd_iter_array = np.zeros(2)
-    ksd_iter_array = np.zeros(2)
+    # mmd_iter_array = np.zeros(2)
+    wd_iter_array = np.zeros(3)
+    # ksd_iter_array = np.zeros(2)
     for k, cond_sample in enumerate(cond_samples):
         us_gen = cond_samples[k][:, 1:2]
         if k == 0:
             samps = samps0
-            score_V = score_V0
+            # score_V = score_V0
             base_wd = base_wd0
-            base_ksd = base_ksd0
+            # base_ksd = base_ksd0
         elif k == 1:
             samps = samps1
-            score_V = score_V1
+            # score_V = score_V1
             base_wd = base_wd1
-            base_ksd = base_ksd1
+            # base_ksd = base_ksd1
         elif k == 2:
             samps = samps4
-            score_V = score_V4
+            # score_V = score_V4
             base_wd = base_wd4
-            base_ksd = base_ksd4
-        mmd_iter_array[k] = get_kme(us_gen, samps)
+            # base_ksd = base_ksd4
+        # mmd_iter_array[k] = get_kme(us_gen, samps)
         wd_iter_array[k] = (
             wasserstein_1d(np.array(us_gen), samps, p=2)
             / base_wd
         )
-        ksd_iter_array[k] = compute_ksd_jax(us_gen, score_V, bandwidth=bandwidth) / base_ksd
-    mmd0_array[i] = mmd_iter_array[0]
+        # ksd_iter_array[k] = compute_ksd_jax(us_gen, score_V, bandwidth=bandwidth) / base_ksd
+    # mmd0_array[i] = mmd_iter_array[0]
     wd0_array[i] = wd_iter_array[0]
-    ksd0_array[i] = ksd_iter_array[0]
-    mmd1_array[i] = mmd_iter_array[0]
-    wd1_array[i] = wd_iter_array[0]
-    ksd1_array[i] = ksd_iter_array[0]
-    mmd4_array[i] = mmd_iter_array[1]
-    wd4_array[i] = wd_iter_array[1]
-    ksd4_array[i] = ksd_iter_array[1]
+    # ksd0_array[i] = ksd_iter_array[0]
+    # mmd1_array[i] = mmd_iter_array[0]
+    wd1_array[i] = wd_iter_array[1]
+    # ksd1_array[i] = ksd_iter_array[0]
+    # mmd4_array[i] = mmd_iter_array[1]
+    wd4_array[i] = wd_iter_array[2]
+    # ksd4_array[i] = ksd_iter_array[1]
     wandb.log(
         {
             "relative error (wd): 0": wd0_array[i]
@@ -336,31 +337,31 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         step=sample_no,
     )
     # wandb.log({"relative error (swd) - mcmc": swd_mcmc[i]}, step=sample_no)
-    wandb.log({"relative error (mmd): 0": mmd0_array[i]}, step=sample_no)
-    wandb.log({"relative error (mmd): -1": mmd1_array[i]}, step=sample_no)
-    wandb.log({"relative error (mmd): -4.2": mmd4_array[i]}, step=sample_no)
-    wandb.log({"relative error (ksd): 0": ksd0_array[i]}, step=sample_no)
-    wandb.log({"relative error (ksd): -1": ksd1_array[i]}, step=sample_no)
-    wandb.log({"relative error (ksd): -4.2": ksd4_array[i]}, step=sample_no)
-    print(f"This is the relative MMD error on 0.0: {mmd0_array[i]}")
+    # wandb.log({"relative error (mmd): 0": mmd0_array[i]}, step=sample_no)
+    # wandb.log({"relative error (mmd): -1": mmd1_array[i]}, step=sample_no)
+    # wandb.log({"relative error (mmd): -4.2": mmd4_array[i]}, step=sample_no)
+    # wandb.log({"relative error (ksd): 0": ksd0_array[i]}, step=sample_no)
+    # wandb.log({"relative error (ksd): -1": ksd1_array[i]}, step=sample_no)
+    # wandb.log({"relative error (ksd): -4.2": ksd4_array[i]}, step=sample_no)
+    # print(f"This is the relative MMD error on 0.0: {mmd0_array[i]}")
     print(f"This is the relative SWD error on 0.0: {wd0_array[i]}")
-    print(f"This is the relative KSD error on 0.0: {ksd0_array[i]}")
-    print(f"This is the relative MMD error on -1.0: {mmd1_array[i]}")
+    # print(f"This is the relative KSD error on 0.0: {ksd0_array[i]}")
+    # print(f"This is the relative MMD error on -1.0: {mmd1_array[i]}")
     print(f"This is the relative SWD error on -1.0: {wd1_array[i]}")
-    print(f"This is the relative KSD error on -1.0: {ksd1_array[i]}")
-    print(f"This is the relative MMD error on -4.2: {mmd4_array[i]}")
+    # print(f"This is the relative KSD error on -1.0: {ksd1_array[i]}")
+    # print(f"This is the relative MMD error on -4.2: {mmd4_array[i]}")
     print(f"This is the relative SWD error on -4.2: {wd4_array[i]}")
-    print(f"This is the relative KSD error on -4.2: {ksd4_array[i]}")
+    # print(f"This is the relative KSD error on -4.2: {ksd4_array[i]}")
 
-np.save(os.path.join(output_dir0, f"nn_conv_mmd_{RANK}.npy"), mmd0_array)
+# np.save(os.path.join(output_dir0, f"nn_conv_mmd_{RANK}.npy"), mmd0_array)
 np.save(os.path.join(output_dir0, f"nn_conv_wd_{RANK}.npy"), wd0_array)
-np.save(os.path.join(output_dir0, f"nn_conv_ksd_{RANK}.npy"), ksd0_array)
+# np.save(os.path.join(output_dir0, f"nn_conv_ksd_{RANK}.npy"), ksd0_array)
 
-np.save(os.path.join(output_dir1, f"nn_conv_mmd_{RANK}.npy"), mmd0_array)
+# np.save(os.path.join(output_dir1, f"nn_conv_mmd_{RANK}.npy"), mmd0_array)
 np.save(os.path.join(output_dir1, f"nn_conv_wd_{RANK}.npy"), wd0_array)
-np.save(os.path.join(output_dir1, f"nn_conv_ksd_{RANK}.npy"), ksd0_array)
+# np.save(os.path.join(output_dir1, f"nn_conv_ksd_{RANK}.npy"), ksd0_array)
 
-np.save(os.path.join(output_dir4, f"nn_conv_mmd_{RANK}.npy"), mmd4_array)
+# np.save(os.path.join(output_dir4, f"nn_conv_mmd_{RANK}.npy"), mmd4_array)
 np.save(os.path.join(output_dir4, f"nn_conv_wd_{RANK}.npy"), wd4_array)
-np.save(os.path.join(output_dir4, f"nn_conv_ksd_{RANK}.npy"), ksd4_array)
+# np.save(os.path.join(output_dir4, f"nn_conv_ksd_{RANK}.npy"), ksd4_array)
 print("Successfully trained all models and now saving results!")

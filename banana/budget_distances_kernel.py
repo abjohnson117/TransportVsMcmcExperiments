@@ -59,7 +59,7 @@ for i, cond_num in enumerate(tqdm(conditioning_list)):
     sde_array = np.zeros(cond_num)
     # mcmc_array = np.zeros(cond_num)
     for j in range(cond_num):
-        ker_array[j] = wd(ker_samps[:, j].reshape(-1), rej_samps[:, j].reshape(-1))
+        ker_array[j] = wd(ker_samps[:, j].reshape(-1), rej_samps[:, j].reshape(-1), p=2)
         # mcmc_array[j] = wd(mcmc_samps[:, j].reshape(-1), rej_samps[:, j].reshape(-1))
     wd_ker_array[i] = np.mean(ker_array)
     # wd_mcmc_array[i] = np.mean(mcmc_array)
