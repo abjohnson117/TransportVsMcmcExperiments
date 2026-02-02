@@ -42,10 +42,9 @@ from triangular_transport.kernels.kernel_tools import (
     vectorize_kfunc,
     get_sum_of_kernels,
 )
-from ksd import compute_ksd_jax
+# from ksd import compute_ksd_jax
 
 plt.style.use("ggplot")
-
 
 def median_heuristic_sigma_jax(X, Y=None, max_points=5000, seed=0):
     X = jnp.asarray(X).reshape(X.shape[0], -1)
@@ -78,7 +77,7 @@ args = parser.parse_args()
 RANK = args.run_id
 
 run = wandb.init(
-    project="2D Convergence - Banana - Transport - ode (new prior)",
+    project="2D Convergence - 8gaussians - Transport - ode (correct prior)",
     name=f"run={RANK}-ode-converge",
 )
 
@@ -88,11 +87,11 @@ output_root0 = "converge_results_0"
 output_dir0 = os.path.join(output_root0, f"run_{RANK:02d}")
 os.makedirs(output_dir0, exist_ok=True)
 
-output_root1 = "converge_results_banana"
+output_root1 = "converge_results_2"
 output_dir1 = os.path.join(output_root1, f"run_{RANK:02d}")
 os.makedirs(output_dir1, exist_ok=True)
 
-output_root4 = "converge_results_4"
+output_root4 = "converge_results_3"
 output_dir4 = os.path.join(output_root4, f"run_{RANK:02d}")
 os.makedirs(output_dir4, exist_ok=True)
 
@@ -102,29 +101,32 @@ rng = np.random.RandomState(seed)
 # base_data = inf_train_gen(data="banana", rng=rng, batch_size=nsamples)
 # us_base = base_data[:, 1:2]
 samps0 = np.load("rej_samples_0.npy")
-samps1 = np.load("rej_samples_1.npy")
-samps4 = np.load("rej_samples_4.npy")
-us_base = rng.randn(nsamples, 1) * 2
+samps2 = np.load("rej_samples_2.npy")
+samps3 = np.load("rej_samples_3.npy")
+mean = 0.016955564
+std = 2.029254
+us_base = mean + std * rng.randn(nsamples,)
+# us_base = get_8gaussians_reference(key=None, shape=(nsamples, 1), rng=rng)
 print("About to calculate wd...")
 base_wd0 = wasserstein_1d(
-    us_base,
+    us_base.squeeze(),
     samps0,
     p=2,
 )
-base_wd1 = wasserstein_1d(
-    us_base,
-    samps1,
+base_wd2 = wasserstein_1d(
+    us_base.squeeze(),
+    samps2,
     p=2,
 )
-base_wd4 = wasserstein_1d(
-    us_base,
-    samps4,
+base_wd3 = wasserstein_1d(
+    us_base.squeeze(),
+    samps3,
     p=2,
 )
 print(f"This is the base wd0: {base_wd0}")
-print(f"This is the base wd1: {base_wd1}")
-print(f"This is the base wd4: {base_wd4}")
-gamma = median_heuristic_sigma_jax(us_base, samps4)
+print(f"This is the base wd1: {base_wd2}")
+print(f"This is the base wd4: {base_wd3}")
+gamma = median_heuristic_sigma_jax(us_base, samps3)
 k1 = get_gaussianRBF(gamma)
 k2 = get_gaussianRBF(gamma - 6.0)
 k3 = get_gaussianRBF(gamma - 3.0)
@@ -154,12 +156,9 @@ def get_kme(X, Y):
 
 # print(f"This is the base MMD: {get_kme(us_base, samps)}")
 
-a = 2
-b = 0.1
-sigma_x = 1
 cond_no0 = 0.0
-cond_no1 = -1.0
-cond_no4 = -4.2
+cond_no1 = 2.45
+cond_no4 = -2.95
 cond_vals = [cond_no0, cond_no1, cond_no4]
 
 # def log_density_V0(u):
@@ -206,15 +205,15 @@ loss_iter = 1
 wd0_array = np.zeros(len(sample_no_list))
 # mmd0_array = np.zeros(len(sample_no_list))
 # ksd0_array = np.zeros(len(sample_no_list))
-wd1_array = np.zeros(len(sample_no_list))
+wd2_array = np.zeros(len(sample_no_list))
 # mmd1_array = np.zeros(len(sample_no_list))
 # ksd1_array = np.zeros(len(sample_no_list))
-wd4_array = np.zeros(len(sample_no_list))
+wd3_array = np.zeros(len(sample_no_list))
 # mmd4_array = np.zeros(len(sample_no_list))
 # ksd4_array = np.zeros(len(sample_no_list))
-epochs = 400
+epochs = 7000
 rng2 = np.random.RandomState(RANK)
-x1_data = inf_train_gen(data="banana", rng=rng2, batch_size=100000)
+x1_data = inf_train_gen(data="8gaussians", rng=rng2, batch_size=100000)
 solver_args = {"solver": diffrax.Dopri5(), "max_steps": 50000, "stepsize_controller": diffrax.PIDController(rtol=1e-4, atol=1e-6)}
 for i, sample_no in tqdm(enumerate(sample_no_list)):
 
@@ -233,7 +232,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     dim = yu_dimension[0] + yu_dimension[1]
     # hidden_layer_list = [256] * 4 if train_dim < 8000 else [1024] * 8
     hidden_layer_list = [512] * 6
-    # hidden_layer_list = [256] * 3
+    # hidden_layer_list = [256] * 4
     # hidden_layer_list = [1024] * 8
     target_data = x1_data[:sample_no, :]
     model = MLP(
@@ -259,7 +258,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     interpolant = linear_interpolant
     interpolant_der = linear_interpolant_der
     interpolant_args = {"t": None, "x1": None, "x0": None}
-    reference_sampler_args = {"mu": 0, "sigma": 2.0}
+    reference_sampler_args = {"mu": mean, "sigma": std}
 
     trainer = NNTrainer(
         target_density=None,
@@ -292,21 +291,21 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     wd_iter_array = np.zeros(3)
     # ksd_iter_array = np.zeros(2)
     for k, cond_sample in enumerate(cond_samples):
-        us_gen = cond_samples[k][:, 1:2]
+        us_gen = cond_samples[k][:, 1]
         if k == 0:
             samps = samps0
             # score_V = score_V0
             base_wd = base_wd0
             # base_ksd = base_ksd0
         elif k == 1:
-            samps = samps1
+            samps = samps2
             # score_V = score_V1
-            base_wd = base_wd1
+            base_wd = base_wd2
             # base_ksd = base_ksd1
         elif k == 2:
-            samps = samps4
+            samps = samps3
             # score_V = score_V4
-            base_wd = base_wd4
+            base_wd = base_wd3
             # base_ksd = base_ksd4
         # mmd_iter_array[k] = get_kme(us_gen, samps)
         wd_iter_array[k] = (
@@ -318,10 +317,10 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     wd0_array[i] = wd_iter_array[0]
     # ksd0_array[i] = ksd_iter_array[0]
     # mmd1_array[i] = mmd_iter_array[0]
-    wd1_array[i] = wd_iter_array[1]
+    wd2_array[i] = wd_iter_array[1]
     # ksd1_array[i] = ksd_iter_array[0]
     # mmd4_array[i] = mmd_iter_array[1]
-    wd4_array[i] = wd_iter_array[2]
+    wd3_array[i] = wd_iter_array[2]
     # ksd4_array[i] = ksd_iter_array[1]
     wandb.log(
         {
@@ -331,13 +330,13 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     )
     wandb.log(
         {
-            "relative error (wd): -1": wd1_array[i]
+            "relative error (wd): 2.45": wd2_array[i]
         },
         step=sample_no,
     )
     wandb.log(
         {
-            "relative error (wd): -4.2": wd4_array[i]
+            "relative error (wd): -2.95": wd3_array[i]
         },
         step=sample_no,
     )
@@ -352,10 +351,10 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     print(f"This is the relative SWD error on 0.0: {wd0_array[i]}")
     # print(f"This is the relative KSD error on 0.0: {ksd0_array[i]}")
     # print(f"This is the relative MMD error on -1.0: {mmd1_array[i]}")
-    print(f"This is the relative SWD error on -1.0: {wd1_array[i]}")
+    print(f"This is the relative SWD error on 2.45: {wd2_array[i]}")
     # print(f"This is the relative KSD error on -1.0: {ksd1_array[i]}")
     # print(f"This is the relative MMD error on -4.2: {mmd4_array[i]}")
-    print(f"This is the relative SWD error on -4.2: {wd4_array[i]}")
+    print(f"This is the relative SWD error on -2.95: {wd3_array[i]}")
     # print(f"This is the relative KSD error on -4.2: {ksd4_array[i]}")
 
 # np.save(os.path.join(output_dir0, f"nn_conv_mmd_{RANK}.npy"), mmd0_array)
@@ -363,10 +362,10 @@ np.save(os.path.join(output_dir0, f"nn_conv_wd_{RANK}.npy"), wd0_array)
 # np.save(os.path.join(output_dir0, f"nn_conv_ksd_{RANK}.npy"), ksd0_array)
 
 # np.save(os.path.join(output_dir1, f"nn_conv_mmd_{RANK}.npy"), mmd0_array)
-np.save(os.path.join(output_dir1, f"nn_conv_wd_{RANK}.npy"), wd1_array)
+np.save(os.path.join(output_dir1, f"nn_conv_wd_{RANK}.npy"), wd2_array)
 # np.save(os.path.join(output_dir1, f"nn_conv_ksd_{RANK}.npy"), ksd0_array)
 
 # np.save(os.path.join(output_dir4, f"nn_conv_mmd_{RANK}.npy"), mmd4_array)
-np.save(os.path.join(output_dir4, f"nn_conv_wd_{RANK}.npy"), wd4_array)
+np.save(os.path.join(output_dir4, f"nn_conv_wd_{RANK}.npy"), wd3_array)
 # np.save(os.path.join(output_dir4, f"nn_conv_ksd_{RANK}.npy"), ksd4_array)
 print("Successfully trained all models and now saving results!")

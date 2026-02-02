@@ -208,6 +208,8 @@ banana/kernel_results
 banana/logs
 banana/nn_results_no_loop
 banana/converge_results*
+8gaussians/mcmc_results*
+8gaussians/converge_results*
 poisson-broken
 # wandb
 # hippylib

@@ -6,6 +6,7 @@ from tqdm.auto import tqdm
 import json
 import time
 from emcee import EnsembleSampler
+import emcee
 
 plt.style.use("ggplot")
 
@@ -54,12 +55,12 @@ start = time.perf_counter()
 for i in range(no_trials):
     # rng2 = np.random.RandomState(45 + i)
     initial = np.random.randn(nwalkers, ndim)
-    # sampler = EnsembleSampler(nwalkers, ndim, log_dens, moves=[
-    #     (emcee.moves.DEMove(), 0.8),
-    #     (emcee.moves.DESnookerMove(), 0.1),
-    #     (emcee.moves.KDEMove(), 0.1),
-    # ])
-    sampler = EnsembleSampler(nwalkers, ndim, log_eight_gaussians_cond)
+    sampler = EnsembleSampler(nwalkers, ndim, log_eight_gaussians_cond, moves=[
+        (emcee.moves.DEMove(), 0.8),
+        (emcee.moves.DESnookerMove(), 0.1),
+        (emcee.moves.KDEMove(), 0.1),
+    ])
+    # sampler = EnsembleSampler(nwalkers, ndim, log_eight_gaussians_cond)
     sampler.run_mcmc(initial, nsteps, progress=True)
 
     mcmc_samps[i, :, :, :] = sampler.chain
@@ -71,7 +72,9 @@ choose_samples = 100000
 rng = np.random.RandomState(seed)
 samps = np.load("rej_samples_0.npy")
 # print(samps.reshape(-1).shape)
-us_base = rng.randn(choose_samples, 1)
+mean = 0.016955564
+std = 2.029254
+us_base = mean + std * rng.randn(nsamples,)
 base_wd = wd(
     us_base.reshape(-1),
     samps.reshape(-1),

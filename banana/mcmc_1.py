@@ -56,7 +56,7 @@ choose_samples = 100000
 rng = np.random.RandomState(seed)
 samps = np.load("rej_samples_1.npy")
 # print(samps.reshape(-1).shape)
-us_base = rng.randn(choose_samples, 1)
+us_base = rng.randn(choose_samples, 1) * 2
 base_wd = wd(
     us_base.reshape(-1),
     samps.reshape(-1),

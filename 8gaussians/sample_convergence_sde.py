@@ -1,6 +1,6 @@
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 from tqdm.auto import tqdm
@@ -10,31 +10,19 @@ import jax
 import jax.numpy as jnp
 from jax import grad, vmap, random
 import optax
-import diffrax
 from seaborn import kdeplot
 import wandb
 from ot.lp import wasserstein_1d
 import argparse
 import pickle
 
-from triangular_transport.flows.flow_trainer import (
-    NNTrainer,
-)
-
-from triangular_transport.flows.interpolants import (
-    linear_interpolant,
-    linear_interpolant_der,
-    trig_interpolant,
-    trig_interpolant_der,
-    sigmoid_interpolant,
-    sigmoid_interpolant_der,
-)
-from triangular_transport.flows.loss_functions import vec_field_loss
+from triangular_transport.flows.sde_flow_trainer import NNSDE
+from triangular_transport.flows.interpolants import linear_interpolant_noise, linear_interpolant_der_noise
+from triangular_transport.flows.loss_functions import vec_field_loss, denoiser_loss
 from triangular_transport.networks.flow_networks import MLP
 from triangular_transport.flows.methods.sampling import inf_train_gen
 from triangular_transport.flows.dataloaders import (
-    standard_gaussian_reference_sampler,
-    gaussian_reference_sampler
+    gaussian_reference_sampler,
 )
 
 from triangular_transport.kernels.kernel_tools import (
@@ -42,10 +30,35 @@ from triangular_transport.kernels.kernel_tools import (
     vectorize_kfunc,
     get_sum_of_kernels,
 )
-from ksd import compute_ksd_jax
 
 plt.style.use("ggplot")
 
+@vmap
+def trig_interpolant_noise(t: jnp.array, x1: jnp.array, x0: jnp.array, z: jnp.array):
+    return (
+        jnp.cos((jnp.pi / 2) * t) * x0
+        + jnp.sin((jnp.pi / 2) * t) * x1
+        + gamma_vmap(t) * z
+    )
+
+
+@vmap
+def trig_interpolant_der_noise(
+    t: jnp.array, x1: jnp.array, x0: jnp.array, z: jnp.array
+):
+    return (jnp.pi / 2) * (
+        -jnp.sin((jnp.pi / 2) * t) * x0
+        + jnp.cos((jnp.pi / 2) * t) * x1
+    ) + gammadot(t) * z
+
+def gamma(t):
+    return 0.1 * jnp.sqrt(2 * t * (1 - t) + 1e-8)
+
+@vmap
+def gammadot(t):
+    return 0.1 * (1 - 2 * t) / jnp.sqrt(t - t ** 2 + 1e-8)
+
+gamma_vmap = vmap(gamma)
 
 def median_heuristic_sigma_jax(X, Y=None, max_points=5000, seed=0):
     X = jnp.asarray(X).reshape(X.shape[0], -1)
@@ -69,6 +82,8 @@ def median_heuristic_sigma_jax(X, Y=None, max_points=5000, seed=0):
     sigma = jnp.median(D)
     return float(sigma)
 
+def gamma_fn(t):
+    return 0.1 * jnp.sqrt(2 * (t - t**2) + 1e-8)
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -78,33 +93,33 @@ args = parser.parse_args()
 RANK = args.run_id
 
 run = wandb.init(
-    project="2D Convergence - Banana - Transport - ode (new prior)",
-    name=f"run={RANK}-ode-converge",
+    project="2D Convergence - 8gaussains - Transport - sde (correct prior)",
+    name=f"run={RANK}-sde-converge",
 )
 
 # Kernel stuff for MMD
 
-output_root0 = "converge_results_0"
+output_root0 = "converge_results_0_sde"
 output_dir0 = os.path.join(output_root0, f"run_{RANK:02d}")
 os.makedirs(output_dir0, exist_ok=True)
 
-output_root1 = "converge_results_banana"
+output_root1 = "converge_results_2_sde"
 output_dir1 = os.path.join(output_root1, f"run_{RANK:02d}")
 os.makedirs(output_dir1, exist_ok=True)
 
-output_root4 = "converge_results_4"
+output_root4 = "converge_results_3_sde"
 output_dir4 = os.path.join(output_root4, f"run_{RANK:02d}")
 os.makedirs(output_dir4, exist_ok=True)
 
 nsamples = 100000
 seed = 1
 rng = np.random.RandomState(seed)
-# base_data = inf_train_gen(data="banana", rng=rng, batch_size=nsamples)
-# us_base = base_data[:, 1:2]
 samps0 = np.load("rej_samples_0.npy")
-samps1 = np.load("rej_samples_1.npy")
-samps4 = np.load("rej_samples_4.npy")
-us_base = rng.randn(nsamples, 1) * 2
+samps2 = np.load("rej_samples_2.npy")
+samps3 = np.load("rej_samples_3.npy")
+mean = 0.016955564
+std = 2.029254
+us_base = mean + std * rng.randn(nsamples,)
 print("About to calculate wd...")
 base_wd0 = wasserstein_1d(
     us_base,
@@ -113,18 +128,18 @@ base_wd0 = wasserstein_1d(
 )
 base_wd1 = wasserstein_1d(
     us_base,
-    samps1,
+    samps2,
     p=2,
 )
 base_wd4 = wasserstein_1d(
     us_base,
-    samps4,
+    samps3,
     p=2,
 )
 print(f"This is the base wd0: {base_wd0}")
-print(f"This is the base wd1: {base_wd1}")
-print(f"This is the base wd4: {base_wd4}")
-gamma = median_heuristic_sigma_jax(us_base, samps4)
+print(f"This is the base wd2: {base_wd1}")
+print(f"This is the base wd3: {base_wd4}")
+gamma = median_heuristic_sigma_jax(us_base, samps3)
 k1 = get_gaussianRBF(gamma)
 k2 = get_gaussianRBF(gamma - 6.0)
 k3 = get_gaussianRBF(gamma - 3.0)
@@ -151,36 +166,33 @@ def MMD(X, Y):
 def get_kme(X, Y):
     return (MMD(X, Y)) ** 2 / (jnp.mean(ker(Y, Y))) ** 2
 
-
-# print(f"This is the base MMD: {get_kme(us_base, samps)}")
-
 a = 2
 b = 0.1
 sigma_x = 1
 cond_no0 = 0.0
-cond_no1 = -1.0
-cond_no4 = -4.2
+cond_no1 = 2.45
+cond_no4 = -2.95
 cond_vals = [cond_no0, cond_no1, cond_no4]
 
-# def log_density_V0(u):
-#     y = cond_no0
-#     scale = 1 / (2 * sigma_x**2)
-#     sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
-#     return jnp.squeeze(-scale * sum_part)
-# def log_density_V1(u):
-#     y = cond_no1
-#     scale = 1 / (2 * sigma_x**2)
-#     sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
-#     return jnp.squeeze(-scale * sum_part)
-# def log_density_V4(u):
-#     y = cond_no4
-#     scale = 1 / (2 * sigma_x**2)
-#     sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
-#     return jnp.squeeze(-scale * sum_part)
+def log_density_V0(u):
+    y = cond_no0
+    scale = 1 / (2 * sigma_x**2)
+    sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
+    return jnp.squeeze(-scale * sum_part)
+def log_density_V1(u):
+    y = cond_no1
+    scale = 1 / (2 * sigma_x**2)
+    sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
+    return jnp.squeeze(-scale * sum_part)
+def log_density_V4(u):
+    y = cond_no4
+    scale = 1 / (2 * sigma_x**2)
+    sum_part = (a * (y + b * (u**2 + a**2))) ** 2 + (u**2) / (a**2)
+    return jnp.squeeze(-scale * sum_part)
 
 
 # score_V0 = vmap(vmap(grad(log_density_V0)))
-# score_V1 = vmap(vmap(grad(log_density_V1)))
+# score_V1 = vmap(vmap(grad(log_density_V0)))
 # score_V4 = vmap(vmap(grad(log_density_V4)))
 # bandwidth = median_heuristic_sigma_jax(samps4)
 # base_ksd0 = compute_ksd_jax(samps0, score_V0, bandwidth=bandwidth)
@@ -200,22 +212,20 @@ sample_no_list.append(70000)
 sample_no_list.append(80000)
 sample_no_list.append(90000)
 sample_no_list.append(100000)
-# sample_no_list = [30000, 40000]
-loss_iter = 1
-# hidden_layer_list = [[256] * 2, [256] * 3, [256] * 4, [512] * 3, [512] * 4, [512] * 6, [1024] * 8]
+
 wd0_array = np.zeros(len(sample_no_list))
 # mmd0_array = np.zeros(len(sample_no_list))
 # ksd0_array = np.zeros(len(sample_no_list))
-wd1_array = np.zeros(len(sample_no_list))
+wd2_array = np.zeros(len(sample_no_list))
 # mmd1_array = np.zeros(len(sample_no_list))
 # ksd1_array = np.zeros(len(sample_no_list))
-wd4_array = np.zeros(len(sample_no_list))
+wd3_array = np.zeros(len(sample_no_list))
 # mmd4_array = np.zeros(len(sample_no_list))
 # ksd4_array = np.zeros(len(sample_no_list))
-epochs = 400
+epochs = 7000
 rng2 = np.random.RandomState(RANK)
-x1_data = inf_train_gen(data="banana", rng=rng2, batch_size=100000)
-solver_args = {"solver": diffrax.Dopri5(), "max_steps": 50000, "stepsize_controller": diffrax.PIDController(rtol=1e-4, atol=1e-6)}
+x1_data = inf_train_gen(data="8gaussians", rng=rng2, batch_size=100000)
+solver_args = {"saveat": "t1", "eps": 5e-3}
 for i, sample_no in tqdm(enumerate(sample_no_list)):
 
     key = random.PRNGKey(i + 1 + RANK)
@@ -232,50 +242,72 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     yu_dimension = (1, 1)
     dim = yu_dimension[0] + yu_dimension[1]
     # hidden_layer_list = [256] * 4 if train_dim < 8000 else [1024] * 8
-    hidden_layer_list = [512] * 6
-    # hidden_layer_list = [256] * 3
+    # hidden_layer_list = [512] * 6
+    hidden_layer_list_vel = [256] * 3
+    hidden_layer_list_score = [512] * 4
     # hidden_layer_list = [1024] * 8
     target_data = x1_data[:sample_no, :]
-    model = MLP(
+    velocity = MLP(
         key=key1,
         dim=dim,
         time_varying=True,
-        w=hidden_layer_list,
-        num_layers=len(hidden_layer_list) + 1,
+        w=hidden_layer_list_vel,
+        num_layers=len(hidden_layer_list_vel) + 1,
         activation_fn=jax.nn.gelu,  # GeLU worked well
     )
-    schedule = optax.warmup_cosine_decay_schedule(
+    score = MLP(
+        key=key2,
+        dim=dim,
+        time_varying=True,
+        w=hidden_layer_list_score,
+        num_layers=len(hidden_layer_list_score) + 1,
+        activation_fn=jax.nn.gelu,  # GeLU worked well
+    )
+    v_schedule = optax.warmup_cosine_decay_schedule(
         init_value=0.0,
         peak_value=1e-3,
         warmup_steps=2000,
         decay_steps=steps,
         end_value=1e-5,
     )
-
-    optimizer = optax.chain(
-        optax.clip_by_global_norm(1.0), optax.adamw(schedule)
+    s_schedule = optax.warmup_cosine_decay_schedule(
+        init_value=0.0,
+        peak_value=3e-4,
+        warmup_steps=2000,
+        decay_steps=steps,
+        end_value=1e-5,
     )
 
-    interpolant = linear_interpolant
-    interpolant_der = linear_interpolant_der
-    interpolant_args = {"t": None, "x1": None, "x0": None}
-    reference_sampler_args = {"mu": 0, "sigma": 2.0}
+    v_optimizer = optax.chain(
+        optax.clip_by_global_norm(1.0), optax.adamw(v_schedule)
+    )
+    s_optimizer = optax.chain(
+        optax.clip_by_global_norm(1.0), optax.adam(s_schedule)
+    )
 
-    trainer = NNTrainer(
+    interpolant = linear_interpolant_noise
+    interpolant_der = linear_interpolant_der_noise
+    interpolant_args = {"t": None, "x1": None, "x0": None, "z": None}
+    reference_sampler_args = {"mu": mean, "sigma": std}
+
+    trainer = NNSDE(
         target_density=None,
-        model=model,
-        optimizer=optimizer,
+        velocity=velocity,
+        score=score,
+        v_optimizer=v_optimizer,
+        s_optimizer=s_optimizer,
         interpolant=interpolant,
         interpolant_der=interpolant_der,
         reference_sampler=gaussian_reference_sampler,
-        loss=vec_field_loss,
+        v_loss=vec_field_loss,
+        s_loss=denoiser_loss,
         interpolant_args=interpolant_args,
         yu_dimension=yu_dimension,
         reference_sampler_args=reference_sampler_args,
     )
 
     trainer.train(
-        train_data=target_data,
+        x1_data=target_data,
         train_dim=train_dim,
         batch_size=batch_size,
         steps=steps,
@@ -287,24 +319,26 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         cond_values=cond_vals,
         nsamples=nsamples,
         u0_cond=None,
+        solver_args=solver_args,
+        gamma=gamma_fn,
     )
-    # mmd_iter_array = np.zeros(2)
+    # mmd_iter_array = np.zeros(3)
     wd_iter_array = np.zeros(3)
-    # ksd_iter_array = np.zeros(2)
+    # ksd_iter_array = np.zeros(3)
     for k, cond_sample in enumerate(cond_samples):
-        us_gen = cond_samples[k][:, 1:2]
+        us_gen = cond_samples[k][:, 1]
         if k == 0:
             samps = samps0
             # score_V = score_V0
             base_wd = base_wd0
             # base_ksd = base_ksd0
         elif k == 1:
-            samps = samps1
+            samps = samps2
             # score_V = score_V1
             base_wd = base_wd1
             # base_ksd = base_ksd1
         elif k == 2:
-            samps = samps4
+            samps = samps3
             # score_V = score_V4
             base_wd = base_wd4
             # base_ksd = base_ksd4
@@ -317,12 +351,12 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     # mmd0_array[i] = mmd_iter_array[0]
     wd0_array[i] = wd_iter_array[0]
     # ksd0_array[i] = ksd_iter_array[0]
-    # mmd1_array[i] = mmd_iter_array[0]
-    wd1_array[i] = wd_iter_array[1]
-    # ksd1_array[i] = ksd_iter_array[0]
-    # mmd4_array[i] = mmd_iter_array[1]
-    wd4_array[i] = wd_iter_array[2]
-    # ksd4_array[i] = ksd_iter_array[1]
+    # mmd1_array[i] = mmd_iter_array[1]
+    wd2_array[i] = wd_iter_array[1]
+    # ksd1_array[i] = ksd_iter_array[1]
+    # mmd4_array[i] = mmd_iter_array[2]
+    wd3_array[i] = wd_iter_array[2]
+    # ksd4_array[i] = ksd_iter_array[2]
     wandb.log(
         {
             "relative error (wd): 0": wd0_array[i]
@@ -331,13 +365,13 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     )
     wandb.log(
         {
-            "relative error (wd): -1": wd1_array[i]
+            "relative error (wd): 2.45": wd2_array[i]
         },
         step=sample_no,
     )
     wandb.log(
         {
-            "relative error (wd): -4.2": wd4_array[i]
+            "relative error (wd): -2.95": wd3_array[i]
         },
         step=sample_no,
     )
@@ -352,21 +386,22 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     print(f"This is the relative SWD error on 0.0: {wd0_array[i]}")
     # print(f"This is the relative KSD error on 0.0: {ksd0_array[i]}")
     # print(f"This is the relative MMD error on -1.0: {mmd1_array[i]}")
-    print(f"This is the relative SWD error on -1.0: {wd1_array[i]}")
+    print(f"This is the relative SWD error on -1.0: {wd2_array[i]}")
     # print(f"This is the relative KSD error on -1.0: {ksd1_array[i]}")
     # print(f"This is the relative MMD error on -4.2: {mmd4_array[i]}")
-    print(f"This is the relative SWD error on -4.2: {wd4_array[i]}")
+    print(f"This is the relative SWD error on -4.2: {wd3_array[i]}")
     # print(f"This is the relative KSD error on -4.2: {ksd4_array[i]}")
 
+print("Successfully trained all models and now saving results!")
 # np.save(os.path.join(output_dir0, f"nn_conv_mmd_{RANK}.npy"), mmd0_array)
 np.save(os.path.join(output_dir0, f"nn_conv_wd_{RANK}.npy"), wd0_array)
 # np.save(os.path.join(output_dir0, f"nn_conv_ksd_{RANK}.npy"), ksd0_array)
 
-# np.save(os.path.join(output_dir1, f"nn_conv_mmd_{RANK}.npy"), mmd0_array)
-np.save(os.path.join(output_dir1, f"nn_conv_wd_{RANK}.npy"), wd1_array)
-# np.save(os.path.join(output_dir1, f"nn_conv_ksd_{RANK}.npy"), ksd0_array)
+# np.save(os.path.join(output_dir1, f"nn_conv_mmd_{RANK}.npy"), mmd1_array)
+np.save(os.path.join(output_dir1, f"nn_conv_wd_{RANK}.npy"), wd2_array)
+# np.save(os.path.join(output_dir1, f"nn_conv_ksd_{RANK}.npy"), ksd1_array)
 
 # np.save(os.path.join(output_dir4, f"nn_conv_mmd_{RANK}.npy"), mmd4_array)
-np.save(os.path.join(output_dir4, f"nn_conv_wd_{RANK}.npy"), wd4_array)
+np.save(os.path.join(output_dir4, f"nn_conv_wd_{RANK}.npy"), wd3_array)
 # np.save(os.path.join(output_dir4, f"nn_conv_ksd_{RANK}.npy"), ksd4_array)
-print("Successfully trained all models and now saving results!")
+
