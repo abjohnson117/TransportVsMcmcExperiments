@@ -78,7 +78,7 @@ args = parser.parse_args()
 RANK = args.run_id
 
 run = wandb.init(
-    project="2D Convergence - Banana - Transport - ode (new prior)",
+    project="2D Convergence - Banana - Transport - ode (small epoch)",
     name=f"run={RANK}-ode-converge",
 )
 
@@ -247,7 +247,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     schedule = optax.warmup_cosine_decay_schedule(
         init_value=0.0,
         peak_value=1e-3,
-        warmup_steps=2000,
+        warmup_steps=400,
         decay_steps=steps,
         end_value=1e-5,
     )
@@ -287,6 +287,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         cond_values=cond_vals,
         nsamples=nsamples,
         u0_cond=None,
+        solver_args=solver_args,
     )
     # mmd_iter_array = np.zeros(2)
     wd_iter_array = np.zeros(3)

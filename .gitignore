@@ -202,14 +202,20 @@ banana/nn_results
 banana/mcmc_results*
 banana/budget_results
 banana/nn_sde_results
-banana/mcmc_results
 banana/hyperparam_results
+banana/mcmc_results
 banana/kernel_results
 banana/logs
+banana/*logs
 banana/nn_results_no_loop
 banana/converge_results*
+banana/converge_results_banana
 8gaussians/mcmc_results*
 8gaussians/converge_results*
+8gaussians/rej_results
+8gaussians/nn_results
+8gaussians/nn_sde_results
+8gaussians/budget_results
 poisson-broken
 # wandb
 # hippylib

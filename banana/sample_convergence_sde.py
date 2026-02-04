@@ -8,13 +8,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 import jax
 import jax.numpy as jnp
-from jax import grad, vmap, random
+from jax import vmap, random
 import optax
-from seaborn import kdeplot
+import diffrax
 import wandb
 from ot.lp import wasserstein_1d
 import argparse
-import pickle
+import time
+import json
 
 from triangular_transport.flows.sde_flow_trainer import NNSDE
 from triangular_transport.flows.interpolants import linear_interpolant_noise, linear_interpolant_der_noise
@@ -22,7 +23,7 @@ from triangular_transport.flows.loss_functions import vec_field_loss, denoiser_l
 from triangular_transport.networks.flow_networks import MLP
 from triangular_transport.flows.methods.sampling import inf_train_gen
 from triangular_transport.flows.dataloaders import (
-    standard_gaussian_reference_sampler,
+    gaussian_reference_sampler,
 )
 
 from triangular_transport.kernels.kernel_tools import (
@@ -94,7 +95,7 @@ args = parser.parse_args()
 RANK = args.run_id
 
 run = wandb.init(
-    project="2D Convergence - Banana - Transport - sde (last)",
+    project="2D Convergence - Banana - Transport - sde (small epoch)",
     name=f"run={RANK}-sde-converge",
 )
 
@@ -118,7 +119,7 @@ rng = np.random.RandomState(seed)
 samps0 = np.load("rej_samples_0.npy")
 samps1 = np.load("rej_samples_1.npy")
 samps4 = np.load("rej_samples_4.npy")
-us_base = rng.randn(nsamples, 1)
+us_base = rng.randn(nsamples, 1) * 2
 print("About to calculate wd...")
 base_wd0 = wasserstein_1d(
     us_base.squeeze(),
@@ -221,10 +222,11 @@ wd1_array = np.zeros(len(sample_no_list))
 wd4_array = np.zeros(len(sample_no_list))
 # mmd4_array = np.zeros(len(sample_no_list))
 # ksd4_array = np.zeros(len(sample_no_list))
-epochs = 7000
+epochs = 500
 rng2 = np.random.RandomState(RANK)
 x1_data = inf_train_gen(data="banana", rng=rng2, batch_size=100000)
-solver_args = {"saveat": "t1", "eps": 5e-3}
+solver_args = {"saveat": "t1", "eps": 5e-3, "stepsize_controller": diffrax.PIDController(rtol=1e-4, atol=1e-6)}
+start = time.perf_counter()
 for i, sample_no in tqdm(enumerate(sample_no_list)):
 
     key = random.PRNGKey(i + 1 + RANK)
@@ -265,14 +267,14 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     v_schedule = optax.warmup_cosine_decay_schedule(
         init_value=0.0,
         peak_value=1e-3,
-        warmup_steps=2000,
+        warmup_steps=400,
         decay_steps=steps,
         end_value=1e-5,
     )
     s_schedule = optax.warmup_cosine_decay_schedule(
         init_value=0.0,
         peak_value=3e-4,
-        warmup_steps=2000,
+        warmup_steps=400,
         decay_steps=steps,
         end_value=1e-5,
     )
@@ -284,9 +286,10 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         optax.clip_by_global_norm(1.0), optax.adam(s_schedule)
     )
 
-    interpolant = trig_interpolant_noise
-    interpolant_der = trig_interpolant_der_noise
+    interpolant = linear_interpolant_noise
+    interpolant_der = linear_interpolant_der_noise
     interpolant_args = {"t": None, "x1": None, "x0": None, "z": None}
+    reference_sampler_args = {"mu": 0, "sigma": 2.0}
 
     trainer = NNSDE(
         target_density=None,
@@ -296,11 +299,12 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         s_optimizer=s_optimizer,
         interpolant=interpolant,
         interpolant_der=interpolant_der,
-        reference_sampler=standard_gaussian_reference_sampler,
+        reference_sampler=gaussian_reference_sampler,
         v_loss=vec_field_loss,
         s_loss=denoiser_loss,
         interpolant_args=interpolant_args,
         yu_dimension=yu_dimension,
+        reference_sampler_args=reference_sampler_args,
     )
 
     trainer.train(
@@ -389,7 +393,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     print(f"This is the relative SWD error on -4.2: {wd4_array[i]}")
     # print(f"This is the relative KSD error on -4.2: {ksd4_array[i]}")
 
-print("Successfully trained all models and now saving results!")
+elapsed = time.perf_counter() - start
 # np.save(os.path.join(output_dir0, f"nn_conv_mmd_{RANK}.npy"), mmd0_array)
 np.save(os.path.join(output_dir0, f"nn_conv_wd_{RANK}.npy"), wd0_array)
 # np.save(os.path.join(output_dir0, f"nn_conv_ksd_{RANK}.npy"), ksd0_array)
@@ -402,3 +406,12 @@ np.save(os.path.join(output_dir1, f"nn_conv_wd_{RANK}.npy"), wd1_array)
 np.save(os.path.join(output_dir4, f"nn_conv_wd_{RANK}.npy"), wd4_array)
 # np.save(os.path.join(output_dir4, f"nn_conv_ksd_{RANK}.npy"), ksd4_array)
 
+timings = {
+    "sde_time": elapsed,
+    "timestamp": time.time()
+}
+
+with open(os.path.join(output_dir0, "timings.json"), "w") as f:
+    json.dump(timings, f, indent=2)
+
+print("Successfully trained all models and now saving results!")
