@@ -10,7 +10,6 @@ import jax
 import jax.numpy as jnp
 from jax import grad, vmap, random
 import optax
-import diffrax
 import time
 import json
 import argparse
@@ -26,7 +25,9 @@ from triangular_transport.flows.interpolants import (
 from triangular_transport.flows.loss_functions import vec_field_loss
 from triangular_transport.networks.flow_networks import MLP
 from triangular_transport.flows.methods.sampling import inf_train_gen
-from triangular_transport.flows.dataloaders import gaussian_reference_sampler
+from triangular_transport.flows.dataloaders import (
+    standard_gaussian_reference_sampler,
+)
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -43,16 +44,12 @@ os.makedirs(output_dir, exist_ok=True)
 
 budget = 4 ** 8
 n_train_samps = budget # TODO: Can change this. But the idea of these plots is to use the max budget. NN evals don't require any more forward evals, so we can max out the budget here.
-# epochs = 6500
 epochs = 400
-mean = 0.016955564
-std = 2.029254
 seed = args.run_id
 rng = np.random.RandomState(seed)
-conditioning_ys = rng.uniform(low=-3.1, high=3.1, size=(budget, ))
+conditioning_ys = rng.uniform(low=-3.0, high=3.0, size=(budget, ))
 conditioning_list = [4 ** i for i in range(9)]
 gen_sample_list = list(reversed(conditioning_list))
-solver_args = {"solver": diffrax.Dopri5(), "max_steps": 50000, "stepsize_controller": diffrax.PIDController(rtol=1e-4, atol=1e-6)}
 
 # Train the one model
 train_dim = n_train_samps
@@ -65,7 +62,10 @@ steps_per_epoch = int(np.ceil(train_dim / batch_size))
 steps = steps_per_epoch * epochs
 print_every = 10000
 yu_dimension = (1, 1)
-target_data = inf_train_gen(data="8gaussians", rng=None, batch_size=train_dim)
+# target_data = inf_train_gen(data="banana", rng=None, batch_size=train_dim)
+ys = np.random.uniform(low=-3.0, high=3.0, size=(budget, 1))
+us = np.tanh(ys) + np.random.gamma(shape=1.0, scale=0.3, size=(budget, 1))
+target_data = np.hstack([ys, us])
 dim = yu_dimension[0] + yu_dimension[1]
 hidden_layer_list = [512] * 6
 # hidden_layer_list = [256] * 3
@@ -92,7 +92,6 @@ optimizer = optax.chain(
 interpolant = linear_interpolant
 interpolant_der = linear_interpolant_der
 interpolant_args = {"t": None, "x1": None, "x0": None}
-reference_sampler_args = {"mu": mean, "sigma": std}
 
 velocity = NNTrainer(
     target_density=None,
@@ -100,11 +99,10 @@ velocity = NNTrainer(
     optimizer=optimizer,
     interpolant=interpolant,
     interpolant_der=interpolant_der,
-    reference_sampler=gaussian_reference_sampler,
+    reference_sampler=standard_gaussian_reference_sampler,
     loss=vec_field_loss,
     interpolant_args=interpolant_args,
     yu_dimension=yu_dimension,
-    reference_sampler_args=reference_sampler_args,
 )
 
 start_train = time.perf_counter()
@@ -121,13 +119,13 @@ elapsed_train = time.perf_counter() - start_train
 # Start conditioning
 start_sample = time.perf_counter()
 nsamples = 5000
+nn_samps = np.zeros((budget, nsamples))
 cond_vars = conditioning_ys.tolist()
 print("About to start drawing samples...")
 cond_samples = velocity.conditional_sample(
     cond_values=cond_vars,
     nsamples=nsamples,
     u0_cond=None,
-    solver_args=solver_args,
 )
 nn_samps = (jnp.hstack(cond_samples))[:, 1::2]
 elapsed_sample = time.perf_counter() - start_sample

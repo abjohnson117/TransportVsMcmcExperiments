@@ -1,6 +1,6 @@
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 from tqdm.auto import tqdm
@@ -77,7 +77,7 @@ args = parser.parse_args()
 RANK = args.run_id
 
 run = wandb.init(
-    project="2D Convergence - 8gaussians - Transport - ode (correct prior)",
+    project="2D Convergence - 8gaussians - Transport - ode (low epoch)",
     name=f"run={RANK}-ode-converge",
 )
 
@@ -98,15 +98,12 @@ os.makedirs(output_dir4, exist_ok=True)
 nsamples = 100000
 seed = 1
 rng = np.random.RandomState(seed)
-# base_data = inf_train_gen(data="banana", rng=rng, batch_size=nsamples)
-# us_base = base_data[:, 1:2]
 samps0 = np.load("rej_samples_0.npy")
 samps2 = np.load("rej_samples_2.npy")
 samps3 = np.load("rej_samples_3.npy")
 mean = 0.016955564
 std = 2.029254
 us_base = mean + std * rng.randn(nsamples,)
-# us_base = get_8gaussians_reference(key=None, shape=(nsamples, 1), rng=rng)
 print("About to calculate wd...")
 base_wd0 = wasserstein_1d(
     us_base.squeeze(),
@@ -211,7 +208,7 @@ wd2_array = np.zeros(len(sample_no_list))
 wd3_array = np.zeros(len(sample_no_list))
 # mmd4_array = np.zeros(len(sample_no_list))
 # ksd4_array = np.zeros(len(sample_no_list))
-epochs = 7000
+epochs = 400
 rng2 = np.random.RandomState(RANK)
 x1_data = inf_train_gen(data="8gaussians", rng=rng2, batch_size=100000)
 solver_args = {"solver": diffrax.Dopri5(), "max_steps": 50000, "stepsize_controller": diffrax.PIDController(rtol=1e-4, atol=1e-6)}
@@ -246,7 +243,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     schedule = optax.warmup_cosine_decay_schedule(
         init_value=0.0,
         peak_value=1e-3,
-        warmup_steps=2000,
+        warmup_steps=400,
         decay_steps=steps,
         end_value=1e-5,
     )

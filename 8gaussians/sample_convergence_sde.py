@@ -1,6 +1,6 @@
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 from tqdm.auto import tqdm
@@ -222,7 +222,7 @@ wd2_array = np.zeros(len(sample_no_list))
 wd3_array = np.zeros(len(sample_no_list))
 # mmd4_array = np.zeros(len(sample_no_list))
 # ksd4_array = np.zeros(len(sample_no_list))
-epochs = 7000
+epochs = 500
 rng2 = np.random.RandomState(RANK)
 x1_data = inf_train_gen(data="8gaussians", rng=rng2, batch_size=100000)
 solver_args = {"saveat": "t1", "eps": 5e-3}
@@ -266,14 +266,14 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     v_schedule = optax.warmup_cosine_decay_schedule(
         init_value=0.0,
         peak_value=1e-3,
-        warmup_steps=2000,
+        warmup_steps=400,
         decay_steps=steps,
         end_value=1e-5,
     )
     s_schedule = optax.warmup_cosine_decay_schedule(
         init_value=0.0,
         peak_value=3e-4,
-        warmup_steps=2000,
+        warmup_steps=300,
         decay_steps=steps,
         end_value=1e-5,
     )

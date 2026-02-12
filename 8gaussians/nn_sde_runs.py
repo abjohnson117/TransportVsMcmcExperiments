@@ -61,7 +61,7 @@ os.makedirs(output_root, exist_ok=True)
 os.makedirs(output_dir, exist_ok=True)
 
 budget = 4 ** 8
-n_train_samps = budget # TODO: Can change this. But the idea of these plots is to use the max budget. NN evals don't require any more forward evals, so we can max out the budget here.
+n_train_samps = budget
 epochs = 500
 mean = 0.016955564
 std = 2.029254
@@ -82,7 +82,7 @@ steps_per_epoch = int(np.ceil(train_dim / batch_size))
 steps = steps_per_epoch * epochs
 print_every = 10000
 yu_dimension = (1, 1)
-target_data = inf_train_gen(data="banana", rng=None, batch_size=train_dim)
+target_data = inf_train_gen(data="8gaussians", rng=None, batch_size=train_dim)
 dim = yu_dimension[0] + yu_dimension[1]
 hidden_layer_list_vel = [256] * 3
 hidden_layer_list_score = [512] * 4
@@ -172,14 +172,13 @@ cond_samples = trainer.conditional_sample(
     gamma=gamma_fn,
     solver_args=solver_args,
 )
-cond_sample_list = [cond_sample[:, yu_dimension[0]:] for cond_sample in cond_samples]
-nn_samps = jnp.hstack(cond_samples).T
+nn_samps = (jnp.hstack(cond_samples))[:, 1::2]
 elapsed_sample = time.perf_counter() - start_sample
 
 np.save(os.path.join(output_dir, "nn_samps.npy"), nn_samps)
 timings = {
-    "nn_time_ode": elapsed_train,
-    "sample_ode_time": elapsed_sample,
+    "nn_time_sde": elapsed_train,
+    "sample_sde_time": elapsed_sample,
     "timestamp": time.time(),
 }
 with open(os.path.join(output_dir, "timings.json"), "w") as f:
