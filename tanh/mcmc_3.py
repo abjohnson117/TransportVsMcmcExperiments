@@ -40,14 +40,17 @@ nsamples = 100000
 nsteps = nsamples
 burn_in = 1
 ndim = 1
+minval = -1.0
+maxval = 0.3
 mcmc_samps = np.zeros((no_trials, nsteps, ndim))
 sample_no_list = np.load("sample_no_list.npy").tolist()
 start = time.perf_counter()
 for i in range(no_trials):
+    x0 = random.uniform(random.key(i), shape=ndim, minval=minval, maxval=maxval)
     adapt_mcmc = AdaptiveMCMC(
         target_density=tanh_density,
         alpha_function=alpha,
-        seed=np.random.choice(1000000),
+        seed=i + 11,
         train_dim=1,
         steps=nsteps,
         name="Adaptive - Conditional",
@@ -65,7 +68,7 @@ elapsed = time.perf_counter() - start
 seed = 1
 choose_samples = 100000
 rng = np.random.RandomState(seed)
-samps = np.load("samps_0.npy")
+samps = np.load("samps_3.npy")
 us_base = rng.randn(nsamples,)
 base_wd = wd(
     us_base.reshape(-1),

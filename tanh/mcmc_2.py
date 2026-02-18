@@ -12,6 +12,7 @@ import time
 from jax import jit, random
 import jax.numpy as jnp
 from triangular_transport.mcmc.adaptive_mcmc import AdaptiveMCMC
+from triangular_transport.mcmc.mala import MALA
 
 plt.style.use("ggplot")
 
@@ -25,7 +26,7 @@ scale = 0.3
 def tanh_density(u):
     shift = jnp.tanh(cond_no)
     base = (1.0 / scale) * jnp.exp(-(u - shift) / scale)
-    return jnp.where(u < shift, 0.0, base)
+    return (jnp.where(u < shift, 0.0, base)).squeeze()
 
 def log_density(u):
     return np.log(tanh_density(cond_no, u))
@@ -34,6 +35,12 @@ def alpha(x, w, log_density):
     log_w = log_density(w)
     log_x = log_density(x)
     return jnp.minimum(0.0, log_w - log_x)
+# def alpha(x, w, transition_kernels, V_exp):
+#     num = V_exp(w) * transition_kernels[0]
+#     denom = V_exp(x) * transition_kernels[1]
+#     return jnp.minimum(1., num / denom)
+
+alpha_args = {"V_exp": tanh_density}
 
 no_trials = 10
 nsamples = 100000
@@ -41,22 +48,41 @@ nsteps = nsamples
 burn_in = 1
 ndim = 1
 mcmc_samps = np.zeros((no_trials, nsteps, ndim))
+minval = 0.4
+maxval = 1.2
 sample_no_list = np.load("sample_no_list.npy").tolist()
 start = time.perf_counter()
 for i in range(no_trials):
+    x0 = random.uniform(random.key(i), shape=ndim, minval=minval, maxval=1.7)
+    print(f"This is x0: {x0}")
     adapt_mcmc = AdaptiveMCMC(
         target_density=tanh_density,
         alpha_function=alpha,
-        seed=np.random.choice(1000000),
-        train_dim=1,
+        seed=i + 10,
+        train_dim=ndim,
         steps=nsteps,
         name="Adaptive - Conditional",
         std_err=0.6,
         iter_step_adapt=1,
         cond_no=cond_no,
         burn_in=burn_in,
+        x0=x0,
     )
     adapt_mcmc.fit(print_every=20000)
+    # mala_mcmc = MALA(
+    #     target_density=tanh_density,
+    #     alpha_function=alpha,
+    #     seed=i+10,
+    #     train_dim=ndim,
+    #     steps=nsteps,
+    #     step_size=gamma,
+    #     name="None",
+    #     alpha_kwargs=alpha_args,
+    #     cond_no=cond_no,
+    #     burn_in=1,
+
+    # )
+    # mala_mcmc.fit(print_every=5000)
 
     mcmc_samps[i, :, :] = adapt_mcmc.samples
     # print(f"Autocorrelation time: {sampler.get_autocorr_time()[0]} steps")
@@ -65,7 +91,7 @@ elapsed = time.perf_counter() - start
 seed = 1
 choose_samples = 100000
 rng = np.random.RandomState(seed)
-samps = np.load("samps_0.npy")
+samps = np.load("samps_2.npy")
 us_base = rng.randn(nsamples,)
 base_wd = wd(
     us_base.reshape(-1),

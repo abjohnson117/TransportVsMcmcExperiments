@@ -53,6 +53,25 @@ output_root4 = "converge_results_3"
 output_dir4 = os.path.join(output_root4, f"run_{RANK:02d}")
 os.makedirs(output_dir4, exist_ok=True)
 
+def exp_reference_sampler(
+    key: random.PRNGKey, shape: tuple[int, int]
+):
+    samples = 0.3 * (random.exponential(key=key, shape=shape))
+    return samples
+
+@vmap
+def sigmoid_interpolant(t: jnp.array, x1: jnp.array, x0: jnp.array):
+    return (1 - sigmoid(t)) * x0 + sigmoid(t) * x1
+
+def sigmoid(t: float) -> float:
+    return jax.nn.sigmoid(25 * (t - 0.35)) # Changed this to 25
+
+sigmoid_dot = vmap(grad(sigmoid))
+
+@vmap
+def sigmoid_interpolant_der(t: jnp.array, x1: jnp.array, x0: jnp.array):
+    return sigmoid_dot(t) * (x1 - x0)
+
 nsamples = 100000
 seed = 1
 rng = np.random.RandomState(seed)
@@ -118,7 +137,9 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     print_every = 10000
     yu_dimension = (1, 1)
     dim = yu_dimension[0] + yu_dimension[1]
-    hidden_layer_list = [512] * 6 #TODO: This needs to be tuned to match performance on MCMC a bit better
+    # hidden_layer_list = [512] * 6 #TODO: This needs to be tuned to match performance on MCMC a bit better
+    # hidden_layer_list = [1024] * 8
+    hidden_layer_list = [256] * 4
     target_data = x1_data[:sample_no, :]
     model = MLP(
         key=key1,
@@ -137,11 +158,11 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     )
 
     optimizer = optax.chain(
-        optax.clip_by_global_norm(1.0), optax.adamw(schedule)
+        optax.clip_by_global_norm(1.0), optax.rmsprop(schedule)
     )
 
-    interpolant = linear_interpolant
-    interpolant_der = linear_interpolant_der
+    interpolant = sigmoid_interpolant
+    interpolant_der = sigmoid_interpolant_der
     interpolant_args = {"t": None, "x1": None, "x0": None}
 
     trainer = NNTrainer(
@@ -150,7 +171,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         optimizer=optimizer,
         interpolant=interpolant,
         interpolant_der=interpolant_der,
-        reference_sampler=standard_gaussian_reference_sampler,
+        reference_sampler=exp_reference_sampler,
         loss=vec_field_loss,
         interpolant_args=interpolant_args,
         yu_dimension=yu_dimension,
@@ -197,13 +218,13 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     )
     wandb.log(
         {
-            "relative error (wd): 2.45": wd2_array[i]
+            "relative error (wd): 2.0": wd2_array[i]
         },
         step=sample_no,
     )
     wandb.log(
         {
-            "relative error (wd): -2.95": wd3_array[i]
+            "relative error (wd): -3.0": wd3_array[i]
         },
         step=sample_no,
     )
