@@ -219,9 +219,11 @@ banana/images
 8gaussians/budget_results
 8gaussians/kernel_results
 8gaussians/images
+8gaussians/budget_results
 tanh/converge_results*
 tanh/mcmc_results*
 tanh/samp_results
+tanh/budget_results
 tanh/nn_results
 poisson-broken
 # wandb

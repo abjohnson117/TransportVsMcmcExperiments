@@ -1,6 +1,6 @@
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 from tqdm.auto import tqdm
@@ -10,6 +10,7 @@ import jax
 import jax.numpy as jnp
 from jax import grad, vmap, random
 import optax
+import diffrax
 import time
 import json
 import argparse
@@ -28,6 +29,24 @@ from triangular_transport.flows.methods.sampling import inf_train_gen
 from triangular_transport.flows.dataloaders import (
     standard_gaussian_reference_sampler,
 )
+
+def exp_reference_sampler(
+    key: random.PRNGKey, shape: tuple[int, int]
+):
+    samples = 0.3 * (random.exponential(key=key, shape=shape))
+    return samples
+
+@vmap
+def sigmoid_interpolant(t: jnp.array, x1: jnp.array, x0: jnp.array):
+    return (1 - sigmoid(t)) * x0 + sigmoid(t) * x1
+
+def sigmoid(t: float) -> float:
+    return jax.nn.sigmoid(27 * (t - 0.35)) # Changed this to 25
+sigmoid_dot = vmap(grad(sigmoid))
+
+@vmap
+def sigmoid_interpolant_der(t: jnp.array, x1: jnp.array, x0: jnp.array):
+    return sigmoid_dot(t) * (x1 - x0)
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -50,7 +69,7 @@ rng = np.random.RandomState(seed)
 conditioning_ys = rng.uniform(low=-3.0, high=3.0, size=(budget, ))
 conditioning_list = [4 ** i for i in range(9)]
 gen_sample_list = list(reversed(conditioning_list))
-
+solver_args = {"solver": diffrax.Dopri5(), "max_steps": 50000, "stepsize_controller": diffrax.PIDController(rtol=1e-4, atol=1e-6)}
 # Train the one model
 train_dim = n_train_samps
 key = random.key(seed=seed)
@@ -67,8 +86,8 @@ ys = np.random.uniform(low=-3.0, high=3.0, size=(budget, 1))
 us = np.tanh(ys) + np.random.gamma(shape=1.0, scale=0.3, size=(budget, 1))
 target_data = np.hstack([ys, us])
 dim = yu_dimension[0] + yu_dimension[1]
-hidden_layer_list = [512] * 6
-# hidden_layer_list = [256] * 3
+# hidden_layer_list = [512] * 6
+hidden_layer_list = [256] * 4
 # hidden_layer_list = [1024] * 8
 model = MLP(
     key=key1,
@@ -126,6 +145,7 @@ cond_samples = velocity.conditional_sample(
     cond_values=cond_vars,
     nsamples=nsamples,
     u0_cond=None,
+    solver_args=solver_args,
 )
 nn_samps = (jnp.hstack(cond_samples))[:, 1::2]
 elapsed_sample = time.perf_counter() - start_sample

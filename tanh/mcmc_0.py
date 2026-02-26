@@ -42,8 +42,10 @@ burn_in = 1
 ndim = 1
 mcmc_samps = np.zeros((no_trials, nsteps, ndim))
 sample_no_list = np.load("sample_no_list.npy").tolist()
+minval = 0.01
 start = time.perf_counter()
 for i in range(no_trials):
+    x0 = random.uniform(random.key(i), shape=ndim, minval=minval, maxval=1.1)
     adapt_mcmc = AdaptiveMCMC(
         target_density=tanh_density,
         alpha_function=alpha,
@@ -55,6 +57,7 @@ for i in range(no_trials):
         iter_step_adapt=1,
         cond_no=cond_no,
         burn_in=burn_in,
+        x0=x0,
     )
     adapt_mcmc.fit(print_every=20000)
 
@@ -67,9 +70,13 @@ choose_samples = 100000
 rng = np.random.RandomState(seed)
 samps = np.load("samps_0.npy")
 us_base = rng.randn(nsamples,)
+u_weights = np.ones(len(us_base)) / len(us_base)
+v_weights = np.ones(len(samps.squeeze())) / len(samps.squeeze())
 base_wd = wd(
-    us_base.reshape(-1),
-    samps.reshape(-1),
+    us_base,
+    samps.squeeze(),
+    u_weights=u_weights,
+    v_weights=v_weights,
     p=2,
 )
 
@@ -78,9 +85,12 @@ for j in tqdm(range(no_trials)):
     for i, sample_no in enumerate(sample_no_list):
         subsamps = mcmc_samps[j, :, :]
         subsamps = subsamps[:sample_no, :]
+        u_weight = np.ones(len(subsamps.squeeze())) / len(subsamps.squeeze())
         wd1 = wd(
-            subsamps.reshape(-1),
-            samps.reshape(-1),
+            subsamps.squeeze(),
+            samps.squeeze(),
+            u_weights=u_weight,
+            v_weights=v_weights,
             p=2
         )
         wd_array[j, i] = wd1

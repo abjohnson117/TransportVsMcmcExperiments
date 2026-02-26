@@ -1,6 +1,6 @@
 import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 from tqdm.auto import tqdm
@@ -35,7 +35,7 @@ args = parser.parse_args()
 RANK = args.run_id
 
 run = wandb.init(
-    project="2D Convergence - tanh - Transport - ode",
+    project="2D Convergence - tanh - Transport - ode - Gauss",
     name=f"run={RANK}-ode-converge",
 )
 
@@ -64,7 +64,7 @@ def sigmoid_interpolant(t: jnp.array, x1: jnp.array, x0: jnp.array):
     return (1 - sigmoid(t)) * x0 + sigmoid(t) * x1
 
 def sigmoid(t: float) -> float:
-    return jax.nn.sigmoid(25 * (t - 0.35)) # Changed this to 25
+    return jax.nn.sigmoid(27 * (t - 0.35)) # Changed this to 25
 
 sigmoid_dot = vmap(grad(sigmoid))
 
@@ -83,21 +83,27 @@ print("About to calculate wd...")
 base_wd0 = wasserstein_1d(
     us_base,
     samps0.squeeze(),
+    u_weights=np.ones(len(us_base)) / len(us_base),
+    v_weights=np.ones(len(samps0.squeeze())) / len(samps0.squeeze()),
     p=2,
 )
 base_wd2 = wasserstein_1d(
     us_base,
     samps2.squeeze(),
+    u_weights=np.ones(len(us_base)) / len(us_base),
+    v_weights=np.ones(len(samps2.squeeze())) / len(samps2.squeeze()),
     p=2,
 )
 base_wd3 = wasserstein_1d(
     us_base,
     samps3.squeeze(),
+    u_weights=np.ones(len(us_base)) / len(us_base),
+    v_weights=np.ones(len(samps2.squeeze())) / len(samps2.squeeze()),
     p=2,
 )
 print(f"This is the base wd0: {base_wd0}")
-print(f"This is the base wd1: {base_wd2}")
-print(f"This is the base wd4: {base_wd3}")
+print(f"This is the base wd2: {base_wd2}")
+print(f"This is the base wd3: {base_wd3}")
 
 cond_no0 = 0.0
 cond_no1 = 2.0
@@ -119,9 +125,11 @@ wd2_array = np.zeros(len(sample_no_list))
 wd3_array = np.zeros(len(sample_no_list))
 epochs = 400
 rng2 = np.random.RandomState(RANK)
-ys = np.random.uniform(low=-3.0, high=3.0, size=(100000, 1))
-us = np.tanh(ys) + np.random.gamma(shape=1.0, scale=0.3, size=(100000, 1))
+ys = rng2.uniform(low=-3.0, high=3.0, size=(100000, 1))
+xi = rng2.gamma(shape=1.0, scale=0.3, size=(100000, 1))
+us = np.tanh(ys) + xi
 x1_data = np.hstack([ys, us])
+
 solver_args = {"solver": diffrax.Dopri5(), "max_steps": 50000, "stepsize_controller": diffrax.PIDController(rtol=1e-4, atol=1e-6)}
 for i, sample_no in tqdm(enumerate(sample_no_list)):
 
@@ -137,9 +145,9 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     print_every = 10000
     yu_dimension = (1, 1)
     dim = yu_dimension[0] + yu_dimension[1]
-    # hidden_layer_list = [512] * 6 #TODO: This needs to be tuned to match performance on MCMC a bit better
+    hidden_layer_list = [512] * 6 #TODO: This needs to be tuned to match performance on MCMC a bit better
     # hidden_layer_list = [1024] * 8
-    hidden_layer_list = [256] * 4
+    # hidden_layer_list = [256] * 4
     target_data = x1_data[:sample_no, :]
     model = MLP(
         key=key1,
@@ -158,11 +166,11 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
     )
 
     optimizer = optax.chain(
-        optax.clip_by_global_norm(1.0), optax.rmsprop(schedule)
+        optax.clip_by_global_norm(1.0), optax.adamw(schedule)
     )
 
-    interpolant = sigmoid_interpolant
-    interpolant_der = sigmoid_interpolant_der
+    interpolant = linear_interpolant
+    interpolant_der = linear_interpolant_der
     interpolant_args = {"t": None, "x1": None, "x0": None}
 
     trainer = NNTrainer(
@@ -171,10 +179,11 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         optimizer=optimizer,
         interpolant=interpolant,
         interpolant_der=interpolant_der,
-        reference_sampler=exp_reference_sampler,
+        reference_sampler=standard_gaussian_reference_sampler,
         loss=vec_field_loss,
         interpolant_args=interpolant_args,
         yu_dimension=yu_dimension,
+        t_sampler=None,
     )
 
     trainer.train(
@@ -190,6 +199,7 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         cond_values=cond_vals,
         nsamples=nsamples,
         u0_cond=None,
+        solver_args=solver_args,
     )
     wd_iter_array = np.zeros(3)
     for k, cond_sample in enumerate(cond_samples):
@@ -204,9 +214,18 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
             samps = samps3
             base_wd = base_wd3
         wd_iter_array[k] = (
-            wasserstein_1d(np.array(us_gen), samps.squeeze(), p=2)
+            wasserstein_1d(
+                np.array(us_gen), 
+                samps.squeeze(), 
+                # np.array(us_gen) / np.array(us_gen).sum(),
+                # samps.squeeze() / samps.squeeze().sum(),
+                u_weights=np.ones(len(us_base)) / len(us_base),
+                v_weights=np.ones(len(samps.squeeze())) / len(samps.squeeze()),
+                p=2
+            )
             / base_wd
         )
+        # wd_iter_array[k] = np.mean(np.abs(np.sort(samps.squeeze())-np.sort(np.array(us_gen))) ** 2) / base_wd
     wd0_array[i] = wd_iter_array[0]
     wd2_array[i] = wd_iter_array[1]
     wd3_array[i] = wd_iter_array[2]
@@ -229,8 +248,8 @@ for i, sample_no in tqdm(enumerate(sample_no_list)):
         step=sample_no,
     )
     print(f"This is the relative WD error on 0.0: {wd0_array[i]}")
-    print(f"This is the relative WD error on 2.45: {wd2_array[i]}")
-    print(f"This is the relative WD error on -2.95: {wd3_array[i]}")
+    print(f"This is the relative WD error on 2.0: {wd2_array[i]}")
+    print(f"This is the relative WD error on -3.0: {wd3_array[i]}")
 
 np.save(os.path.join(output_dir0, f"nn_conv_wd_{RANK}.npy"), wd0_array)
 

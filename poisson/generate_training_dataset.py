@@ -143,12 +143,12 @@ def generate_sample(mesh, Vh, pde, prior):
         misfit = hp.PointwiseStateObservation(Vh[hp.STATE], targets)
 
         utrue = pde.generate_state()
-        state_array = get_data(Vh[hp.STATE], utrue, mesh)
         # state_array = fe_function_to_image(Vh[hp.STATE], utrue)
         # state_array = utrue.get_local().reshape(int(np.sqrt(4225)), int(np.sqrt(4225)), order="F")
 
         x = [utrue, mtrue, None]
         pde.solveFwd(x[hp.STATE], x)
+        state_array = get_data(Vh[hp.STATE], x[hp.STATE], mesh)
         misfit.B.mult(x[hp.STATE], misfit.d)
         MAX = misfit.d.norm("linf")
         noise_std_dev = rel_noise * MAX
@@ -166,8 +166,8 @@ def main():
     here = os.path.dirname(os.path.abspath(__file__))
     yaml_file = os.path.join(here, "poisson.yaml")
 
-    num_samples = 125000
-    output_dir = "sl-data"
+    num_samples = 1 # TODO: change back to 125000
+    output_dir = "training_dataset"
 
     os.makedirs(output_dir, exist_ok=True)
 
@@ -207,10 +207,10 @@ def main():
 
     # Save the datasets
     print("\nSaving datasets...")
-    np.save(os.path.join(output_dir, "parameters.npy"), parameters)
-    np.save(os.path.join(output_dir, "solutions_full.npy"), solutions)
-    np.save(os.path.join(output_dir, "solutions_grid.npy"), misfits)
-    np.save(os.path.join(output_dir, "locations_grid.npy"), targets)
+    np.save(os.path.join(output_dir, "parameters_p.npy"), parameters)
+    np.save(os.path.join(output_dir, "solutions_full_p.npy"), solutions)
+    np.save(os.path.join(output_dir, "solutions_grid_p.npy"), misfits)
+    np.save(os.path.join(output_dir, "locations_grid_p.npy"), targets)
 
     print("\nDataset generation complete!")
     print(f"Files are saved in the '{output_dir}' directory as:")

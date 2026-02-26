@@ -70,21 +70,27 @@ choose_samples = 100000
 rng = np.random.RandomState(seed)
 samps = np.load("samps_3.npy")
 us_base = rng.randn(nsamples,)
+u_weights = np.ones(len(us_base)) / len(us_base)
+v_weights = np.ones(len(samps.squeeze())) / len(samps.squeeze())
 base_wd = wd(
-    us_base.reshape(-1),
-    samps.reshape(-1),
+    us_base,
+    samps.squeeze(),
+    u_weights=u_weights,
+    v_weights=v_weights,
     p=2,
 )
 
 wd_array = np.zeros((no_trials, len(sample_no_list)))
-
 for j in tqdm(range(no_trials)):
     for i, sample_no in enumerate(sample_no_list):
         subsamps = mcmc_samps[j, :, :]
         subsamps = subsamps[:sample_no, :]
+        u_weight = np.ones(len(subsamps.squeeze())) / len(subsamps.squeeze())
         wd1 = wd(
-            subsamps.reshape(-1),
-            samps.reshape(-1),
+            subsamps.squeeze(),
+            samps.squeeze(),
+            u_weights=u_weight,
+            v_weights=v_weights,
             p=2
         )
         wd_array[j, i] = wd1

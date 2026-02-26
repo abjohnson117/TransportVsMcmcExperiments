@@ -1,4 +1,3 @@
-YS_PATH=\"${YS_PATH}\"
 OUTPUT_ROOT=\"${OUTPUT_ROOT}\"
 
 for ((batch=0; batch< TOTAL / BATCH_SIZE; batch++)); do
@@ -498,3 +497,4 @@ for ((batch=0; batch< TOTAL / BATCH_SIZE; batch++)); do
     echo \"Finished batch \$batch (chains \$start_idx .. \$((start_idx + BATCH_SIZE - 1)))\"
 done
 " > hmala_block_${GLOBAL_OFFSET}.log 2>&1 &
+python3 -u generate_training_dataset.py 
