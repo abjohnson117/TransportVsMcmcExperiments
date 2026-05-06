@@ -228,3 +228,55 @@ tanh/nn_results
 poisson-broken
 # wandb
 # hippylib
+
+# poisson — data directories
+poisson/*.npy
+poisson/*.npz
+poisson/mcmc_256/
+poisson/mcmc_main/
+poisson/mcmc_med/
+poisson/mcmc_98_ref/
+poisson/mcmc_main_ref/
+poisson/mcmc_med_ref/
+poisson/convergence_results_final/
+poisson/budget_compare/
+poisson/budget_transport/budget_transport_samps/
+poisson/laplace_eigenvecs/
+poisson/hyperparam_results_sde_mult/
+poisson/mcmc_98_converge_samps/
+poisson/mcmc_main_converge_samps/
+poisson/mcmc_med_converge_samps/
+
+# p-poisson — data directories
+p-poisson/*.npz
+p-poisson/mcmc_256/
+p-poisson/mcmc_main/
+p-poisson/mcmc_median/
+p-poisson/mcmc_98/
+p-poisson/mcmc_main_mala/
+p-poisson/mcmc_main_converge_samps/
+p-poisson/mcmc_med_converge_samps/
+p-poisson/mcmc_98_converge_samps/
+p-poisson/convergence_results/
+p-poisson/convergence_results_final/
+p-poisson/convergence_results_mala/
+p-poisson/hyperparam_results/
+p-poisson/laplace_eigenvecs/
+p-poisson/budget_transport/budget_transport_samps/
+
+# lotka-volterra — data directories
+lotka-volterra/*.npy
+lotka-volterra/converge_results_*/
+lotka-volterra/convergence_results_final/
+lotka-volterra/hyperparam_results/
+lotka-volterra/images/
+lotka-volterra/init_data/
+lotka-volterra/true_samps/
+lotka-volterra/mcmc_norm_results/
+lotka-volterra/mcmc_prior_init_results/
+lotka-volterra/mcmc_mod_results/
+lotka-volterra/mcmc_rare_results/
+lotka-volterra/budget_compare/
+lotka-volterra/budget_mcmc/
+lotka-volterra/budget_transport/
+lotka-volterra/budget_truth/
