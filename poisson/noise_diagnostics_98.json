@@ -1,0 +1,41 @@
+{
+    "noise_variance_set": 0.0001,
+    "actual_noise_variance_approx": 9.961253503014569e-09,
+    "noise_ratio_set_over_actual": 10038.89721004862,
+    "diagnostic_1": {
+        "residual_norm_sq": 0.011258114000658542,
+        "normalized_residual": 1.1258114000658541,
+        "verdict": "OK \u2014 noise is roughly consistent with the data misfit at the MAP."
+    },
+    "diagnostic_2": {
+        "top_5_eigenvalues": [
+            153.57090073685026,
+            16.634155283452433,
+            9.325543654041708,
+            3.250366056961135,
+            1.0856045727145107
+        ],
+        "lam_max": 153.57090073685026,
+        "lam_min_of_top_k": 2.4392056820294072e-06,
+        "frac_gt_1": 0.06,
+        "frac_gt_10": 0.02,
+        "frac_gt_100": 0.01,
+        "frac_gt_1e4": 0.0,
+        "verdict": "Moderate leading eigenvalue. Some directions are data-dominated, which is normal for an informative experiment."
+    },
+    "diagnostic_3": {
+        "top_5_variance_reductions": [
+            0.9935304769834883,
+            0.9432918683131717,
+            0.9031527991643741,
+            0.7647261467368847,
+            0.5205227236827288
+        ],
+        "mean_variance_reduction": 0.06541827865732609,
+        "median_variance_reduction": 0.0016606617680427764,
+        "max_variance_reduction": 0.9935304769834883,
+        "frac_directions_gt_99pct_removed": 0.01,
+        "frac_directions_gt_90pct_removed": 0.03,
+        "verdict": "LOW mean variance reduction. The data is only weakly informative relative to the prior \u2014 noise may be too high."
+    }
+}
