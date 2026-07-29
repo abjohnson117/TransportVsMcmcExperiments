@@ -63,8 +63,8 @@ chain_end   = args.chain_end
 # Budget parameters — matching poisson/budget_mcmc_runs.py
 # ---------------------------------------------------------------------------
 BURNIN    = 1
-STEP_SIZE = 0.1
-N_CHAINS  = chain_end - chain_start  # number of chains to draw from
+# STEP_SIZE = 0.1
+STEP_SIZE = 0.006
 
 nfevs = 256
 conditioning_list_full = [4 ** i for i in range(5)]  # [1, 4, 16, 64, 256]
@@ -113,12 +113,15 @@ def build_targets():
 
 
 def load_all_y_obs(chain_start, chain_end, chain_root):
-    """Load y_obs.npy for chains [chain_start, chain_end)."""
+    """Load y_obs.npy only for chains that have hmala_samples.npy."""
+    valid_idxs = []
     y_obs_list = []
     for idx in range(chain_start, chain_end):
-        path = os.path.join(chain_root, f"chain_{idx:03d}", "y_obs.npy")
-        y_obs_list.append(np.load(path))
-    return y_obs_list
+        if not os.path.exists(os.path.join(chain_root, f"chain_{idx:03d}", "hmala_samples.npy")):
+            continue
+        y_obs_list.append(np.load(os.path.join(chain_root, f"chain_{idx:03d}", "y_obs.npy")))
+        valid_idxs.append(idx)
+    return valid_idxs, y_obs_list
 
 
 def draw_x0(nu, model, obs_idx, base_seed=12344):
@@ -202,7 +205,8 @@ if __name__ == "__main__":
     # Load targets and all y_obs
     # -----------------------------------------------------------------------
     targets      = build_targets()
-    all_y_obs    = load_all_y_obs(chain_start, chain_end, ref_root)
+    valid_idxs, all_y_obs = load_all_y_obs(chain_start, chain_end, ref_root)
+    N_CHAINS     = len(valid_idxs)
     num_vertices = mesh.num_vertices()
 
     noise_variance = NOISE_STD ** 2
@@ -218,8 +222,8 @@ if __name__ == "__main__":
         num_cond_vars = conditioning_list[i]
         chain_length  = int(chain_length)
 
-        local_idxs     = rng.choice(N_CHAINS, size=num_cond_vars, replace=False)
-        random_idxs    = local_idxs + chain_start  # absolute chain indices
+        local_idxs     = rng.choice(N_CHAINS, size=min(num_cond_vars, N_CHAINS), replace=False)
+        random_idxs    = [valid_idxs[li] for li in local_idxs]  # absolute chain indices
         selected_y_obs = [all_y_obs[li] for li in local_idxs]
 
         all_vertex_samples = []

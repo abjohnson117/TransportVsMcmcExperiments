@@ -246,6 +246,8 @@ poisson/hyperparam_results_sde_mult/
 poisson/mcmc_98_converge_samps/
 poisson/mcmc_main_converge_samps/
 poisson/mcmc_med_converge_samps/
+poisson/convergence_results_ode/
+poisson/convergence_results_sde2/
 
 # p-poisson — data directories
 p-poisson/*.npz
@@ -258,11 +260,16 @@ p-poisson/mcmc_main_converge_samps/
 p-poisson/mcmc_med_converge_samps/
 p-poisson/mcmc_98_converge_samps/
 p-poisson/convergence_results/
+p-poisson/convergence_results_sde/
 p-poisson/convergence_results_final/
 p-poisson/convergence_results_mala/
 p-poisson/hyperparam_results/
 p-poisson/laplace_eigenvecs/
 p-poisson/budget_transport/budget_transport_samps/
+p-poisson/budget_compare/budget_results*
+p-poisson/budget_compare/*.txt
+p-poisson/budget_transport/*.txt
+p-poisson/run_log*
 
 # lotka-volterra — data directories
 lotka-volterra/*.npy
@@ -280,3 +287,17 @@ lotka-volterra/budget_compare/
 lotka-volterra/budget_mcmc/
 lotka-volterra/budget_transport/
 lotka-volterra/budget_truth/
+lotka-volterra/run_log*
+
+# shepp-logan - data directories
+shepp-logan-poisson/shepp-logan-data
+shepp-logan-poisson/sl_mcmc_samps
+shepp-logan-poisson/*.h5
+shepp-logan-poisson/*.yaml
+
+# circle
+circle-poisson/circle_mcmc_samps
+circle-poisson/circle-data
+circle-poisson/training_dataset
+circle-poisson/*.h5
+circle-poisson/*.yaml

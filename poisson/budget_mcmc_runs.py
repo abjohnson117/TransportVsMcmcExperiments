@@ -188,7 +188,7 @@ if __name__ == "__main__":
         num_cond_vars = conditioning_list[i]
         chain_length  = int(chain_length)
 
-        random_idxs    = rng.choice(N_CHAINS, size=num_cond_vars, replace=False)
+        random_idxs    = rng.choice(N_CHAINS, size=min(num_cond_vars, N_CHAINS), replace=False)
         selected_y_obs = [all_y_obs[idx] for idx in random_idxs]
 
         all_vertex_samples = []
