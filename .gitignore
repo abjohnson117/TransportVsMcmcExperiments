@@ -291,13 +291,17 @@ lotka-volterra/run_log*
 
 # shepp-logan - data directories
 shepp-logan-poisson/shepp-logan-data
+shepp-logan-poisson/shepp-logan-data-zerobc
 shepp-logan-poisson/sl_mcmc_samps
+shepp-logan-poisson/sl_mcmc_samps_zerobc
 shepp-logan-poisson/*.h5
 shepp-logan-poisson/*.yaml
 
 # circle
 circle-poisson/circle_mcmc_samps
+circle-poisson/circle_mcmc_samps_zerobc
 circle-poisson/circle-data
+circle-poisson/circle-data-zerobc
 circle-poisson/training_dataset
 circle-poisson/*.h5
 circle-poisson/*.yaml
